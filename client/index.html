@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FlyOrDie</title>
+    <!-- Stencil-style display font + a Cyrillic-capable UI font. Offline they fall back gracefully. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=Russo+One&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --olive: #3d4a26;
+        --olive-dark: #262c1a;
+        --khaki: #e8dcb5;
+        --sand: #c9b98d;
+        --amber: #f0a330;
+        --muted: #a59d82;
+        --danger: #e0533c;
+        --warn: #ffb066;
+        --ok: #9fd14a;
+        --title: 'Black Ops One', 'Russo One', Impact, sans-serif;
+        --ui: 'Russo One', 'Segoe UI', system-ui, sans-serif;
+      }
+      body {
+        margin: 0;
+        background: #1a1712;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        color: var(--khaki);
+        font-family: var(--ui);
+        overflow: hidden;
+      }
+      #menu-bg {
+        position: fixed;
+        inset: 0;
+        width: 100vw;
+        height: 100vh;
+        z-index: 0;
+      }
+      #menu-bg[hidden] {
+        display: none;
+      }
+      #gameCanvas {
+        position: relative;
+        z-index: 1;
+        background: #2b3320;
+        box-shadow:
+          0 0 0 3px #1b1f14,
+          0 12px 40px rgba(0, 0, 0, 0.6);
+      }
+      /* In menus the game canvas is transparent so the war backdrop shows through. */
+      body.menu #gameCanvas {
+        background: transparent;
+        box-shadow: none;
+      }
+
+      /* ---------- lobby ---------- */
+      #lobby {
+        position: fixed;
+        inset: 0;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #lobby[hidden] {
+        display: none;
+      }
+      .lobby-panel {
+        position: relative;
+        width: min(580px, calc(100vw - 32px));
+        max-height: calc(100vh - 32px);
+        overflow: auto;
+        background:
+          repeating-linear-gradient(135deg, rgba(255, 255, 255, 0.02) 0 6px, transparent 6px 12px),
+          linear-gradient(180deg, rgba(61, 74, 38, 0.94), rgba(38, 44, 26, 0.96));
+        border: 2px solid #5c6a3c;
+        box-shadow:
+          0 0 0 4px rgba(0, 0, 0, 0.35),
+          0 20px 60px rgba(0, 0, 0, 0.6);
+        padding: 28px 26px 22px;
+        box-sizing: border-box;
+      }
+      /* hazard stripe along the top edge */
+      .lobby-panel::before {
+        content: '';
+        position: absolute;
+        inset: 0 0 auto 0;
+        height: 8px;
+        background: repeating-linear-gradient(135deg, #d9a520 0 12px, #1d1d18 12px 24px);
+      }
+      .lobby-panel h1 {
+        margin: 4px 0 0;
+        font-family: var(--title);
+        font-weight: normal;
+        font-size: 44px;
+        letter-spacing: 3px;
+        color: var(--khaki);
+        text-shadow: 0 3px 0 rgba(0, 0, 0, 0.45);
+      }
+      .lobby-panel .sub {
+        color: var(--muted);
+        margin: 2px 0 18px;
+        font-size: 13px;
+      }
+      label {
+        display: block;
+        font-size: 12px;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        color: var(--sand);
+        margin-bottom: 6px;
+      }
+      #pilot-name,
+      #create-room input,
+      #create-room select {
+        background: rgba(0, 0, 0, 0.35);
+        border: 1px solid #6b7a4a;
+        color: var(--khaki);
+        font: inherit;
+        padding: 8px 10px;
+      }
+      #pilot-name {
+        width: 100%;
+        box-sizing: border-box;
+        font-size: 16px;
+        margin-bottom: 18px;
+      }
+      #pilot-name:focus,
+      #create-room input:focus,
+      #create-room select:focus {
+        outline: none;
+        border-color: var(--amber);
+      }
+      .rooms-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 6px;
+      }
+      .rooms-head h2 {
+        margin: 0;
+        font-family: var(--title);
+        font-weight: normal;
+        font-size: 20px;
+        letter-spacing: 2px;
+      }
+      button {
+        font: inherit;
+        font-size: 14px;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        background: linear-gradient(180deg, #d6c08a, #b49e66);
+        color: #23200f;
+        border: 1px solid #23200f;
+        box-shadow: 0 2px 0 rgba(0, 0, 0, 0.45);
+        padding: 6px 14px;
+        cursor: pointer;
+      }
+      button:hover:not(:disabled) {
+        background: linear-gradient(180deg, #f0b545, #d89520);
+      }
+      button:active:not(:disabled) {
+        transform: translateY(1px);
+        box-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
+      }
+      button:disabled {
+        background: #4a4a40;
+        color: #8a8a7a;
+        cursor: not-allowed;
+        box-shadow: none;
+      }
+      #room-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      #room-list li {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 0;
+        border-top: 1px dashed rgba(201, 185, 141, 0.25);
+      }
+      #room-list li.empty {
+        color: var(--muted);
+      }
+      .room-main {
+        flex: 1;
+        min-width: 0;
+      }
+      .room-name {
+        display: block;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .room-meta {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .room-players {
+        color: var(--ok);
+        font-variant-numeric: tabular-nums;
+      }
+      .room.full .room-players {
+        color: var(--danger);
+      }
+      #lobby-status {
+        margin-top: 12px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      #lobby-status.busy::after {
+        content: ' ⟳';
+      }
+      #lobby-error {
+        margin-top: 10px;
+        color: var(--danger);
+        font-size: 13px;
+      }
+      #lobby-notices {
+        margin: 0 0 16px;
+        padding: 8px 12px 8px 28px;
+        border: 1px solid var(--warn);
+        background: rgba(0, 0, 0, 0.25);
+        color: var(--warn);
+        font-size: 12px;
+      }
+      #server-status.online {
+        color: var(--ok);
+      }
+      #server-status.offline {
+        color: var(--warn);
+      }
+      #create-room {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+      }
+      #create-room[hidden] {
+        display: none;
+      }
+      #create-room input {
+        flex: 1;
+        min-width: 0;
+      }
+
+      /* ---------- in-match chat ---------- */
+      #chat {
+        position: fixed;
+        z-index: 2;
+        width: min(300px, calc(100vw - 32px));
+        background: rgba(30, 34, 20, 0.72);
+        border: 1px solid #5c6a3c;
+        font-size: 12px;
+        padding: 8px;
+        box-sizing: border-box;
+      }
+      #chat[hidden] {
+        display: none;
+      }
+      #chat-roster {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px 10px;
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+      #chat-roster::before {
+        content: 'PILOTS:';
+        color: var(--sand);
+      }
+      #chat-roster .me {
+        color: var(--amber);
+      }
+      #chat-log {
+        list-style: none;
+        margin: 0 0 6px;
+        padding: 0;
+        max-height: 140px;
+        overflow-y: auto;
+        overflow-wrap: anywhere;
+        color: #fff;
+      }
+      #chat-log .sys {
+        color: var(--muted);
+        font-style: italic;
+      }
+      #chat-log .who {
+        color: #9fd8ff;
+      }
+      #chat-log .who.me {
+        color: var(--amber);
+      }
+      #chat-input {
+        width: 100%;
+        box-sizing: border-box;
+        background: rgba(0, 0, 0, 0.45);
+        border: 1px solid #6b7a4a;
+        color: #fff;
+        font: inherit;
+        padding: 5px 6px;
+      }
+      #chat-input:focus {
+        outline: none;
+        border-color: var(--amber);
+      }
+      #chat-status.warn {
+        color: var(--warn);
+        margin-top: 4px;
+      }
+      #lobby-notices[hidden],
+      #lobby-error[hidden] {
+        display: none;
+      }
+    </style>
+  </head>
+  <body class="menu">
+    <canvas id="menu-bg"></canvas>
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="lobby" hidden>
+      <div class="lobby-panel">
+        <h1>FLY OR DIE</h1>
+        <p class="sub">Pick a callsign and a battlefield. <span id="server-status"></span></p>
+        <ul id="lobby-notices" hidden></ul>
+        <label for="pilot-name">Callsign</label>
+        <input id="pilot-name" maxlength="16" autocomplete="off" spellcheck="false" />
+        <div class="rooms-head">
+          <h2>BATTLEFIELDS</h2>
+          <button type="button" id="lobby-refresh">Refresh</button>
+        </div>
+        <ul id="room-list"></ul>
+        <form id="create-room" hidden>
+          <input
+            id="new-room-name"
+            maxlength="32"
+            placeholder="New room name"
+            required
+            autocomplete="off"
+          />
+          <select id="new-room-arena" aria-label="Arena">
+            <option value="classic">fields</option>
+            <option value="rocks">desert</option>
+            <option value="calm">snow</option>
+          </select>
+          <button type="submit">Create</button>
+        </form>
+        <div id="lobby-error" hidden></div>
+        <div id="lobby-status"></div>
+      </div>
+    </div>
+
+    <aside id="chat" hidden>
+      <div id="chat-roster"></div>
+      <ul id="chat-log"></ul>
+      <input id="chat-input" maxlength="200" placeholder="Enter — radio" autocomplete="off" />
+      <div id="chat-status"></div>
+    </aside>
+
+    <!-- relative path: works on Vite, on any static server and under a sub-path -->
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>

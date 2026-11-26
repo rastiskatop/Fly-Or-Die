@@ -1,0 +1,11 @@
+{
+  "id": "calm",
+  "name": "Calm Skies",
+  "seed": 5,
+  "asteroidMass": 2,
+  "initialAsteroids": 2,
+  "seekerChance": 0,
+  "pickupEvery": 5,
+  "maxPickups": 3,
+  "terrain": "snow"
+}

@@ -162,7 +162,7 @@ loading screen ──await loadAll()──▶ lobby ──await join──▶ ma
 
 Controls in a match: **W/↑** thrust, **A/D ←/→** turn, **Space** fire, **M** mute, **Esc** back to the lobby.
 
-## How to run
+## How to run (Lab 3 version — see Lab 4 below for the current layout)
 
 | Way | Command / action | Notes |
 |---|---|---|
@@ -337,3 +337,219 @@ Output: `ok1 catch:boom ok2 finally ok3`. The skipped `.then` still passes the r
 **Дві знахідки:** (1) Vite повертав `index.html` з кодом 200 замість 404 для відсутнього файлу (SPA fallback), тому `res.ok` був `true` — виправлено `appType: 'mpa'`; (2) браузер відкриває ~6 з’єднань HTTP/1.1 на хост, тож решта запитів чекала в черзі, а їхній таймаут уже йшов — виправлено обмежувачем `createLimiter(6)`.
 
 **П’ять головоломок порядку виконання** — вище, всі перевірені в Chrome (`?demo=puzzles`).
+
+
+
+---
+
+# FlyOrDie (Lab 4) — Node.js server: `EventEmitter`, streams, WebSockets
+
+## Run it (from Lab 4 on)
+
+The repo is now an **npm workspace** with two packages:
+
+```
+package.json          workspaces: client, server · root scripts
+client/               the browser game (Labs 1–3), Vite
+server/               Node game server: node:http + ws
+scripts/dev.mjs       runs both in one terminal
+docs/                 screenshots, graphs
+```
+
+| Way | Command | What you get |
+|---|---|---|
+| **Dev (terminal / VS Code terminal)** | `npm install`, then `npm run dev` | server on :8787 + Vite on http://localhost:5173 (proxies `/api`, `/health`, `/ws`) |
+| **Production-like** | `npm start` (builds the client, then starts the server) | one Node process serves the game **and** the API/WebSocket on http://localhost:8787. The link only works while this command is running |
+| **VS Code Live Server** | "Go Live" on the project folder + `npm run dev:server` in a terminal | root `index.html` redirects to `client/`; the client finds the server on :8787 (CORS) |
+| No server running | any of the above without the server | **offline mode**: local game, static room list, no chat |
+| Tests | `npm test` | 14 `node:test` tests (unit + a real server with two WebSocket clients) |
+
+Config: `server/.env.example` → copy to `server/.env` (optional; loaded with `node --env-file-if-exists=.env`).
+
+## What was built
+
+| File | What it does |
+|---|---|
+| `server/src/config.js` | every setting from `process.env`, parsed and validated once (bad value → clear error at startup) |
+| `server/src/index.js` | `node:http` server, WebSocket upgrade on `/ws`, match-log wiring, graceful shutdown (`SIGINT`/`SIGTERM`/IPC), last-resort crash handlers |
+| `server/src/http/static.js` | serves `client/dist`: MIME types, `Content-Length`, cache headers (hashed JS immutable), **path-traversal guard**, streamed with `pipeline` |
+| `server/src/http/api.js` | `GET /health`, `GET /api/rooms`, `POST /api/rooms` (body ≤ 1 KB, validated), `GET /api/replays`, `GET /api/replays/:id` (streamed), debug routes |
+| `server/src/rooms.js` | `Room extends EventEmitter` (`join`/`leave`/`chat`/`event`/`matchStart`/`matchEnd`/`empty`), `RoomManager extends EventEmitter` |
+| `server/src/protocol.js` | protocol **v1**: JSON `{ v, type }` messages, `parseClientMessage()` validates every frame, close codes |
+| `server/src/ws.js` | connection lifecycle: join within 5 s, rate limit → validate → dispatch, roster/chat broadcast, heartbeat, slow-client policy, `error` listener on every socket |
+| `server/src/rate-limit.js` | token bucket (10 msg/s, burst 20) |
+| `server/src/log/matchlog.js` | object-mode `Transform` → NDJSON, `pipeline` to `logs/<room>-<time>-<match>.ndjson` |
+| `server/src/log/replay.js` | async generator over an NDJSON file (`createReadStream` + `readline`) |
+| `client/src/net/connection.js` | `Connection extends EventTarget`: dispatch by `type`, **send queue**, **reconnect with backoff + jitter**, no retry on deliberate refusals |
+| `client/src/net/server.js` | finds the server: same origin, else `:8787` — else offline |
+| `client/src/net/chat-view.js` | in-match roster + chat panel (Enter to chat, Esc to close it) |
+
+### Protocol v1
+
+```
+client → server   { v:1, type:'join', room:'eu-1', name:'Ace' }   { v:1, type:'chat', text:'hi' }   { v:1, type:'leave' }
+server → client   welcome { playerId, room }   roster { players }   chat { from, text, t }   system { text }   error { code, message }
+```
+
+Every frame is validated on the server: JSON object, `v === 1`, a known `type` (`Object.hasOwn` — `"__proto__"` is not a type), per-type fields (room id `[a-z0-9-]{1,32}`, name 1–16 printable chars, chat 1–200 printable chars). Only the known fields are copied on. A violation closes the socket with a code:
+
+| Code | Meaning |
+|---|---|
+| 1008 | rate limit exceeded |
+| 1009 | frame over `maxPayload` (4 KB) — `ws` closes it itself |
+| 4000 | not JSON / wrong shape / binary / first message not `join` |
+| 4001 | unknown type |
+| 4002 | unsupported protocol version |
+| 4003 | no `join` within 5 s |
+| 4004 | room not found / full |
+| 4005 | slow client terminated |
+
+### Two windows, one room
+
+![two windows chatting](docs/lab-04/two-windows-chat.jpg)
+
+Also tested across origins: one window from the Node server (`:8787`), one from a static server like Live Server (`:5600`) — same room, same chat (`docs/lab-04/cross-origin-chat.jpg`).
+
+**Reconnect:** restarting the server (`node --watch`) drops both sockets. `Connection` waits `backoff + jitter`, reconnects, and its persistent `open → join` listener re-joins the same room. Chat typed while disconnected sits in the send queue and is flushed after the server's `welcome`. The server log shows both players back in `eu-1` 0.3 s after the restart.
+
+### Visual theme (after review)
+
+The green-on-black "terminal" look was replaced with a war theme. All art is original and drawn in code:
+- **Menus** (`client/src/render/menu-bg.js`): animated dusk sky over a burning skyline, searchlights, flak bursts, fighters with contrails, and rifles, grenades, cartridges and bombs tumbling through the air. Olive panel with a hazard stripe and a stencil font.
+- **Battlefield** (`client/src/render/battlefield.js`): a top-down map generated once per arena from its seed: fields / desert / snow (`terrain` in the arena JSON), dirt roads with tyre tracks, an airstrip, trenches, craters, sandbag emplacements, trees and a tactical grid. Cloud shadows and plane-shadow formations drift over it. Generation takes ~10 ms, and drawing it costs ~0.06 ms per frame (a pre-rendered offscreen canvas).
+- The plane is now steel-grey with yellow ID markings, so it reads on all three terrains.
+
+![lobby](docs/lab-04/theme-lobby.jpg)
+![battlefield](docs/lab-04/theme-battlefield.jpg)
+
+## M3 — Match logs as streams
+
+```
+room.emit('event', {...})  →  events.on(room, 'event', { close: ['matchEnd'] })  →  Readable.from(…)
+                           →  NdjsonEncoder (object-mode Transform)  →  createWriteStream(logs/…ndjson)
+```
+
+Excerpt of a real log (the server was restarted while two players were in the room, so they left with `1001`):
+
+```json
+{"seq":0,"t":5,"type":"match_start","room":"eu-1","match":"3136f18b","arena":"classic","at":"2026-11-26T12:25:58.725Z"}
+{"seq":1,"t":5,"type":"join","room":"eu-1","player":"bd7a24ed","name":"Bob"}
+{"seq":2,"t":245,"type":"join","room":"eu-1","player":"74e2faff","name":"Alice"}
+{"seq":3,"t":8336,"type":"chat","room":"eu-1","player":"bd7a24ed","text":"after restart"}
+{"seq":4,"t":21725,"type":"leave","room":"eu-1","player":"74e2faff","name":"Alice","reason":"disconnected 1001"}
+{"seq":5,"t":21738,"type":"leave","room":"eu-1","player":"bd7a24ed","name":"Bob","reason":"disconnected 1001"}
+{"seq":6,"t":21738,"type":"match_end","room":"eu-1","match":"3136f18b","reason":"empty","players":0}
+```
+
+**A subtle bug avoided:** `events.on()` must be called *synchronously* when the match starts. The first version subscribed inside the generator (or after `await mkdir`), so the subscription only happened once the stream started reading — `match_start` and the first `join` were already emitted and lost. Now the room emits `matchStart` *before* its first `event`, and `startMatchLog()` subscribes right there, synchronously. `LOG_DIR` is created once at startup.
+
+### Backpressure, measured
+
+`node server/scripts/gen-big-log.mjs 200` writes a 200 MB NDJSON file through the same chain (peak rss of the generator: **84 MB** while writing 200 MB). `node server/scripts/measure-backpressure.mjs 10` downloads it with a client that can only read **10 MB/s** and samples the server's `rss` from `/health` every 250 ms:
+
+![server rss over time](docs/lab-04/backpressure.svg)
+
+| Endpoint | Code | Peak server rss |
+|---|---|---|
+| `/api/replays/:id` | `pipeline(createReadStream(file), res)` | **81 MB** (flat 62–74 MB the whole download) |
+| `/api/debug/replays/:id/naive` | `rs.on('data', c => res.write(c))` | **223 MB** (jumps to 172 MB in 0.3 s, stays there) |
+
+The naive version reads the file at disk speed. Every `res.write()` returns `false` once the socket buffer is full, but the code ignores that, so the whole 200 MB file ends up queued in the process's memory. `pipeline` pauses the file stream when `write()` returns `false` and resumes it on `'drain'`. Memory is bounded by the buffer sizes, not by the file. The throttled client is a script rather than DevTools throttling, so the run is reproducible; raw data is in `docs/lab-04/backpressure.csv`.
+
+## M4 — Abuse limits
+
+| Limit | Where | Default |
+|---|---|---|
+| Messages per connection | token bucket in `ws.js` → close 1008 | 10/s, burst 20 |
+| WebSocket frame size | `new WebSocketServer({ maxPayload })` → 1009 | 4 KB |
+| HTTP body size | `readJsonBody` stops reading and answers 413 | 1 KB |
+| Players per room | `Room.full` → 4004 | 8 |
+| Rooms per server | `RoomManager.create` → `POST /api/rooms` answers 503 | 20 |
+| Join deadline | timer per socket → 4003 | 5 s |
+| Dead connections | ping every 15 s, 2 missed pongs → `terminate()` | |
+| **Slow client** | `socket.bufferedAmount` > 256 KB → drop non-critical messages (chat, system); > 1 MB → close 4005. Roster/welcome/error are always sent | 256 KB |
+
+All of these are covered by `server/test/server.test.js` (except the heartbeat and slow-client timing).
+
+## Event loop, backpressure and crashes (write-up)
+
+**Node event loop phases** (libuv): **timers** (`setTimeout`/`setInterval` callbacks whose time came) → **pending callbacks** → **poll** (wait for and run I/O callbacks: sockets, files) → **check** (`setImmediate`) → **close callbacks**. Between every callback, Node drains `process.nextTick` first, then promise microtasks. Our server's work — an HTTP request, a WebSocket message, a match-log write — is callbacks in the **poll** phase. The heartbeat is a **timer**. All of it runs on **one** JavaScript thread. libuv's thread pool does file I/O and DNS in the background, but every callback that touches our state runs on that thread, one at a time.
+
+**So what happens if a handler blocks for 300 ms?** `node server/scripts/demo-blocking.mjs`: Alice sends a chat message every 50 ms, Bob measures delivery time, and meanwhile `GET /api/debug/block?ms=300` busy-waits three times:
+
+```
+chat latency, normal:           n=46 median=1.0 ms  max=2.0 ms
+chat latency, during a block:   n=18 median=146.7 ms max=310.2 ms
+  sent at   984 →    1 ms
+  sent at  1051 →  310 ms ███████████████████████████████
+  sent at  1107 →  254 ms █████████████████████████
+  sent at  1169 →  192 ms ███████████████████
+  sent at  1232 →  129 ms █████████████
+  sent at  1293 →   69 ms ███████
+  sent at  1361 →    0 ms
+```
+
+A request that has nothing to do with chat froze the chat of **every** room for 300 ms. The messages weren't lost: they waited in the kernel's socket buffers and arrived in a burst when the loop came back. In a game sending 30 snapshots/s, that's 9 frozen frames for every player on the server. Same lesson as Lab 1's busy-wait, with higher stakes. Fixes: never do CPU work in a handler; split it, move it to a `worker_thread` (Lab 7), or precompute it.
+
+**Backpressure:** a fast producer and a slow consumer. `writable.write()` returns `false` when the stream's buffer is above `highWaterMark`. That's the signal to stop until `'drain'`. In M3 it showed up twice. A slow HTTP client downloading a replay: without respecting it, the server buffered the whole 200 MB file. And a slow disk under the match log: `pipeline` stops pulling from the event iterator, and events wait in the iterator instead of piling up in the file stream. For WebSockets, `ws` exposes the same pressure as `socket.bufferedAmount`; that's what the slow-client policy watches.
+
+**Why one unhandled error kills the whole server:** an `EventEmitter` that emits `'error'` with no listener **throws**. A promise rejected with no handler is fatal in Node ≥ 15. Either way the exception reaches the top of the event loop, and there is only one process for every player. Default Node output:
+
+```
+node:events:487
+      throw er; // Unhandled 'error' event
+      ^
+Error: demo: disk full
+```
+
+Our server, `node server/scripts/demo-crash.mjs`:
+
+```
+=== /api/debug/crash?kind=emitter → SERVER DIED (exit code 1)
+  error FATAL uncaughtException err="demo: disk full while writing the match log"
+  info  shutting down signal=uncaughtException
+  info  bye exitCode=1
+
+=== /api/debug/crash?kind=emitter&fixed=1 → server still serving /health (exit code 0)
+  warn  handled emitter error err="demo: disk full while writing the match log"
+
+=== /api/debug/crash?kind=rejection → SERVER DIED (exit code 1)
+  error FATAL unhandledRejection err="demo: database timed out"
+  info  shutting down signal=unhandledRejection
+  info  bye exitCode=1
+
+=== /api/debug/crash?kind=rejection&fixed=1 → server still serving /health (exit code 0)
+  warn  handled rejection err="demo: database timed out"
+```
+
+**The fix** is to handle errors where they happen: `socket.on('error', …)` on every WebSocket, `.catch()` on every match-log `pipeline`, `try/catch` around every API handler (→ 500, not a crash), and `pipeline(…).catch()` for client aborts. The `uncaughtException` / `unhandledRejection` handlers in `index.js` are **not** a way to keep going. After an unknown error the process state can't be trusted, so they log it, flush the match logs, close sockets with 1001 and exit with code 1, so a supervisor (Docker, Lab 8) can restart a clean process.
+
+**Graceful shutdown** (`Ctrl+C`, `SIGTERM`, or the IPC message tests use): stop accepting → close every socket with **1001** → `match_end` in every running match → wait until the log pipelines flush → exit 0; force-exit after 5 s. On Windows a parent process can't deliver `SIGTERM` (it terminates the child), which is why tests and scripts ask for shutdown over IPC.
+
+## Reflection answers (short)
+
+1. Phases: timers → pending → poll → check → close; `nextTick` queue, then promise microtasks, between callbacks. `setTimeout(0)` vs `setImmediate` from the main module depends on whether the 1 ms timer has expired when the loop starts, so the order is unstable. Inside an I/O callback, `setImmediate` always runs first: check comes right after poll.
+2. libuv does the waiting. Network I/O uses the OS's async APIs (epoll/kqueue/IOCP). File I/O, DNS `lookup`, crypto and zlib go to a thread pool (4 threads by default). Our JavaScript never runs there, only the callbacks come back to the main thread.
+3. CJS: `require` is synchronous and dynamic, `module.exports`, has `__dirname`. ESM: static `import`/`export` resolved before running, async loading, top-level `await`, strict by default. `import.meta.dirname` replaces `__dirname` (used in `config.js`).
+4. See the write-up and the graph above.
+5. Readable = source, Writable = sink, Duplex = both, independent sides; Transform = a Duplex whose output is computed from its input (`NdjsonEncoder`). A TCP socket is a **Duplex**.
+6. The client sends `GET /ws` with `Upgrade: websocket` + `Sec-WebSocket-Key`; the server answers `101 Switching Protocols` + `Sec-WebSocket-Accept` (SHA-1 of key + GUID); from then on the same TCP connection carries framed messages both ways. Games need the server to *push* many small messages with low overhead. Polling adds a request per update; SSE is server→client only.
+7. See the crash write-up. The promise equivalent is an unhandled rejection.
+8. `bufferedAmount` grows; memory grows with it. Detect it via `bufferedAmount` / `write()` returning `false`. Options: drop non-critical messages, send only the latest snapshot (Lab 5), lower the rate for that client, or disconnect it. We drop, then close.
+9. Because anyone can open a WebSocket to the server from a console or a script. The client is not the only client, and an unchecked field is a crash or an exploit.
+
+---
+
+# FlyOrDie (Лабораторна 4) — Node.js сервер
+
+**Запуск:** `npm install`, далі `npm run dev` (сервер :8787 + Vite :5173) або `npm run build` + `npm start` (усе на :8787). Live Server у VS Code теж працює: корінь перенаправляє на `client/`, клієнт сам знаходить сервер на :8787. Без сервера — офлайн-режим. Тести: `npm test` (14 тестів).
+
+**Що зроблено:** npm workspaces (`client/`, `server/`); сервер на `node:http` — статика з захистом від `../`, `GET/POST /api/rooms`, `/health`, конфіг з `process.env`, коректне завершення. Кімнати — `Room extends EventEmitter`, протокол v1 з валідацією кожного повідомлення і кодами закриття, heartbeat, `error`-слухач на кожному сокеті. Клієнт: `Connection` з чергою повідомлень і перепідключенням з backoff, чат і список гравців. Два вікна бачать одне одного й переписуються.
+
+**Логи матчів:** `events.on` → `Readable.from` → `NdjsonEncoder` (object-mode Transform) → файл через `pipeline`; реплей віддається стрімом.
+
+**Backpressure:** файл 200 МБ повільному клієнту (10 МБ/с): з `pipeline` пам’ять сервера ≤ 81 МБ, без нього — 223 МБ (весь файл у пам’яті).
+
+**Ліміти:** token bucket 10 повідомлень/с, кадр ≤ 4 КБ, тіло запиту ≤ 1 КБ, ≤ 8 гравців у кімнаті, ≤ 20 кімнат, join за 5 с, політика повільного клієнта за `bufferedAmount`.
+
+**Блокування event loop:** обробник, що крутить CPU 300 мс, затримав чат усіх гравців до 310 мс (норма — 1 мс). **Падіння:** `'error'` без слухача або необроблений reject валить увесь сервер (код 1); виправлення — слухачі та `.catch()` там, де помилка виникає.

@@ -1,0 +1,11 @@
+{
+  "id": "classic",
+  "name": "Classic",
+  "seed": 2026,
+  "asteroidMass": 4,
+  "initialAsteroids": 3,
+  "seekerChance": 0.3,
+  "pickupEvery": 9,
+  "maxPickups": 2,
+  "terrain": "grass"
+}

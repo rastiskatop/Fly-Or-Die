@@ -25,3 +25,7 @@ dist-ssr
 
 # Claude Code local config
 .claude/
+
+# server match logs
+server/logs/
+.env
