@@ -104,6 +104,7 @@ export class Ship extends Entity {
       if (this.respawnIn <= 0) {
         const spot = world.findSafeSpot(this.radius * 8);
         this.respawn(spot.x, spot.y);
+        world.emit('respawned', { shipId: this.id, x: spot.x, y: spot.y });
       }
       return;
     }
@@ -146,6 +147,7 @@ export class Ship extends Entity {
 
     const bullet = new Bullet({ x: nose.x, y: nose.y, vx: vel.x, vy: vel.y, ownerId: this.id });
     bullet.fast = fast;
+    world.emit('fired', { shipId: this.id, x: nose.x, y: nose.y, fast });
     return world.spawn(bullet);
   }
 }

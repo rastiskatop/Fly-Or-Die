@@ -12,5 +12,10 @@ export default [
       globals: globals.browser,
     },
   },
+  {
+    // Node-side files: build config and asset generators
+    files: ['vite.config.js', 'tools/**/*.mjs'],
+    languageOptions: { globals: globals.node },
+  },
   prettier,
 ];

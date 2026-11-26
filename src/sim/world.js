@@ -14,7 +14,9 @@ export function createRng(seed) {
   };
 }
 
-export class World {
+// World is an EventTarget: it announces what happened ("fired", "hit", "exploded", ...)
+// and audio/HUD subscribe. The simulation never imports audio or HUD code.
+export class World extends EventTarget {
   // Map<id, Entity>: number keys stay numbers, real .size, insertion order, no inherited keys.
   #entities = new Map();
   // Deferred structural changes: never add/remove from the Map while systems iterate it.
@@ -22,6 +24,7 @@ export class World {
   #pendingDespawn = new Set();
 
   constructor({ width, height, seed = 1, collisions = findCollisions, onCollision = () => {} }) {
+    super();
     this.width = width;
     this.height = height;
     this.rng = createRng(seed);
@@ -32,6 +35,11 @@ export class World {
     this.collisions = collisions;
     this.onCollision = onCollision;
     this.systems = []; // extra (world, dt) => void systems, e.g. the spawn director
+  }
+
+  /** Dispatches synchronously. Listeners must only READ the event — never mutate the sim. */
+  emit(type, detail) {
+    this.dispatchEvent(new CustomEvent(type, { detail }));
   }
 
   get size() {

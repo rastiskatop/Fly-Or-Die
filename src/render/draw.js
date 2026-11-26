@@ -18,8 +18,10 @@ function renderPos(e, alpha, width, height) {
   return { x, y, angle: lerpAngle(e.prevAngle, e.angle, alpha) };
 }
 
-export function drawGrid(ctx, width, height) {
-  ctx.strokeStyle = '#1a1a1a';
+export function drawGrid(ctx, width, height, { background = '#000', grid = '#1a1a1a' } = {}) {
+  ctx.fillStyle = background;
+  ctx.fillRect(0, 0, width, height);
+  ctx.strokeStyle = grid;
   ctx.lineWidth = 1;
   ctx.beginPath();
   for (let x = 0; x < width; x += 50) {
@@ -33,7 +35,11 @@ export function drawGrid(ctx, width, height) {
   ctx.stroke();
 }
 
-export function drawWorld(ctx, world, alpha, time) {
+/**
+ * Draws every entity. With a sprite sheet loaded, entities are drawn from it; without one
+ * (404 / failed load) the Lab 2 vector drawings are the fallback — the game still runs.
+ */
+export function drawWorld(ctx, world, alpha, time, sprites = null) {
   const { width, height } = world;
   // Draw order by kind: effects under everything, ships on top.
   for (const kind of ['explosion', 'pickup', 'asteroid', 'bullet', 'ship']) {
@@ -42,7 +48,8 @@ export function drawWorld(ctx, world, alpha, time) {
       const p = renderPos(e, alpha, width, height);
       ctx.save();
       ctx.translate(p.x, p.y);
-      DRAW[kind](ctx, e, p.angle, time);
+      const draw = (sprites && SPRITE[kind]) || DRAW[kind];
+      draw(ctx, e, p.angle, time, sprites);
       ctx.restore();
     }
   }
@@ -142,7 +149,10 @@ function drawShip(ctx, ship, angle, time) {
   ctx.restore();
   ctx.globalAlpha = 1;
 
-  // Small HP bar under the plane
+  drawHpBar(ctx, ship);
+}
+
+function drawHpBar(ctx, ship) {
   const w = 30;
   ctx.fillStyle = 'rgba(255,255,255,0.15)';
   ctx.fillRect(-w / 2, ship.radius + 12, w, 3);
@@ -152,13 +162,23 @@ function drawShip(ctx, ship, angle, time) {
 
 function drawBullet(ctx, bullet, angle) {
   ctx.rotate(angle);
-  // Fast bullets ('bullets' pickup) get a longer, brighter streak.
-  ctx.strokeStyle = bullet.fast ? '#fff6a0' : '#ffe14d';
-  ctx.lineWidth = bullet.fast ? 2.5 : 2;
+  // Glowing tracer: wide coloured halo + white core. Fast bullets ('bullets' pickup) are longer and cyan.
+  const tail = bullet.fast ? -28 : -14;
   ctx.lineCap = 'round';
+  ctx.shadowColor = bullet.fast ? '#4fe3ff' : '#ffc21a';
+  ctx.shadowBlur = 8;
+  ctx.strokeStyle = bullet.fast ? '#4fe3ff' : '#ffc21a';
+  ctx.lineWidth = 5;
   ctx.beginPath();
-  ctx.moveTo(bullet.fast ? -16 : -8, 0);
+  ctx.moveTo(tail, 0);
   ctx.lineTo(3, 0);
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(tail * 0.6, 0);
+  ctx.lineTo(2, 0);
   ctx.stroke();
 }
 
@@ -237,59 +257,70 @@ function drawExplosion(ctx, ex) {
   ctx.globalAlpha = 1;
 }
 
-const EFFECT_NAMES = { speed: 'SPEED x2', bullets: 'BULLETS x2' };
+// ---------- sprite versions ----------
 
-export function drawHud(ctx, { stats, world, player, width, height }) {
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'alphabetic';
-  ctx.fillStyle = NEON;
-  ctx.font = '14px monospace';
-  ctx.fillText(`frames/s: ${stats.fps}`, 16, 24);
-  ctx.fillText(`steps/s:  ${stats.ups}`, 16, 44);
-  ctx.fillText(`frame ms: ${stats.frameTime.toFixed(2)}`, 16, 64);
-  ctx.fillText(`entities: ${world.size}`, 16, 84);
+function spriteShip(ctx, ship, angle, time, sprites) {
+  if (ship.destroyed) return;
+  if (ship.invulnerableFor > 0 && Math.floor(time * 12) % 2 === 0) ctx.globalAlpha = 0.35;
+  const anim = Math.floor(time * 15) % 2 === 0 ? 'a' : 'b'; // 2-frame engine flame animation
+  let frame = 'ship';
+  if (ship.hitFlash > 0) frame = 'ship_hit';
+  else if (ship.thrusting)
+    frame = ship.effects.has('speed') ? `ship_boost_${anim}` : `ship_thrust_${anim}`;
+  ctx.save();
+  ctx.rotate(angle);
+  sprites.draw(ctx, frame);
+  ctx.restore();
+  ctx.globalAlpha = 1;
+  drawHpBar(ctx, ship);
+}
 
-  // Score (top right)
-  ctx.textAlign = 'right';
-  ctx.font = 'bold 22px monospace';
-  ctx.fillText(`SCORE ${String(player.score).padStart(6, '0')}`, width - 16, 32);
-  ctx.font = '14px monospace';
-  ctx.fillText(`deaths: ${player.deaths}`, width - 16, 54);
+function spriteBullet(ctx, bullet, angle, time, sprites) {
+  ctx.rotate(angle);
+  sprites.draw(ctx, bullet.fast ? 'bullet_fast' : 'bullet');
+}
 
-  // HP bar + effects (bottom left)
-  ctx.textAlign = 'left';
-  const barW = 200;
-  const y = height - 40;
-  ctx.fillText('HP', 16, y + 11);
-  ctx.strokeStyle = NEON;
-  ctx.strokeRect(44, y, barW, 14);
-  ctx.fillStyle = player.hp > 30 ? NEON : '#ff4d4d';
-  ctx.fillRect(46, y + 2, ((barW - 4) * player.hp) / player.maxHp, 10);
+const ROCKS = ['asteroid_a', 'asteroid_b', 'asteroid_c'];
 
-  let ex = 260;
-  for (const [name, left] of player.effects) {
-    ctx.fillStyle = PICKUP_TYPES[name].color;
-    const label = `${EFFECT_NAMES[name]} ${left.toFixed(1)}s`;
-    ctx.fillText(label, ex, y + 11);
-    ex += ctx.measureText(label).width + 20;
+function spriteAsteroid(ctx, a, angle, time, sprites) {
+  const frame = ROCKS[a.id % ROCKS.length];
+  const k = a.radius / sprites.radiusOf(frame);
+  if (a.homing) {
+    // Seeker: pulsing red halo drawn under the rock.
+    const pulse = 0.35 + 0.25 * Math.sin(time * 8);
+    ctx.beginPath();
+    ctx.arc(0, 0, a.radius + 5, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(255, 77, 77, ${pulse + 0.2})`;
+    ctx.lineWidth = 3;
+    ctx.shadowColor = '#ff4d4d';
+    ctx.shadowBlur = 14;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
   }
-
-  ctx.fillStyle = '#555';
-  ctx.textAlign = 'right';
-  ctx.font = '12px monospace';
-  ctx.fillText('W/↑ thrust · A D/← → turn · SPACE fire', width - 16, height - 16);
-
-  if (player.destroyed) {
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#ff4d4d';
-    ctx.font = 'bold 36px monospace';
-    ctx.fillText('SHOT DOWN', width / 2, height / 2 - 10);
-    ctx.font = '18px monospace';
-    ctx.fillStyle = '#ffffff';
-    ctx.fillText(
-      `respawn in ${Math.max(0, player.respawnIn).toFixed(1)}s`,
-      width / 2,
-      height / 2 + 24,
-    );
+  ctx.rotate(angle);
+  sprites.draw(ctx, frame, k);
+  if (a.hitFlash > 0) {
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = 0.5;
+    sprites.draw(ctx, frame, k);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
   }
 }
+
+function spritePickup(ctx, p, angle, time, sprites) {
+  const timeLeft = p.lifetime - p.age;
+  if (timeLeft < 3 && Math.floor(time * 8) % 2 === 0) ctx.globalAlpha = 0.3;
+  const frame = `pickup_${p.pickup.effect}`;
+  const k = (p.radius / sprites.radiusOf(frame)) * (1 + 0.1 * Math.sin(time * 4));
+  sprites.draw(ctx, frame, k);
+  ctx.globalAlpha = 1;
+}
+
+const SPRITE = {
+  ship: spriteShip,
+  bullet: spriteBullet,
+  asteroid: spriteAsteroid,
+  pickup: spritePickup,
+  // explosions stay procedural particles
+};

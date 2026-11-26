@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="352" viewBox="0 0 960 352">
+<defs>
+  <filter id="glow-bullet" filterUnits="userSpaceOnUse" x="280" y="248" width="200" height="72">
+    <feGaussianBlur stdDeviation="2.5" result="b"/>
+    <feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+    <feGaussianBlur stdDeviation="3" result="b"/>
+    <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+  </filter>
+  
+  <g id="plane-body" stroke-width="1.5" stroke-linejoin="round">
+    <path d="M6 0 L-4 -17 L-9 -17 L-6 -3 L-6 3 L-9 17 L-4 17 Z"/>
+    <path d="M-9 0 L-15 -8 L-18 -8 L-15 0 L-18 8 L-15 8 Z"/>
+    <path d="M20 0 Q12 -4 2 -4 L-15 -3 L-15 3 L2 4 Q12 4 20 0 Z"/>
+    <ellipse cx="8" cy="0" rx="4.5" ry="2" fill="#7fdcff" stroke="none"/>
+    <rect x="-7.5" y="-17.5" width="2" height="2" fill="#ff3b3b" stroke="none"/>
+    <rect x="-7.5" y="15.5" width="2" height="2" fill="#3bff6e" stroke="none"/>
+  </g>
+</defs>
+<g transform="translate(104 64) scale(2.6)">
+    
+    <use href="#plane-body" fill="#123222" stroke="#00ff66"/>
+  </g>
+<g transform="translate(296 64) scale(2.6)">
+    <path d="M-14 -3 L-30.099999999999998 0 L-14 3 Z" fill="#ff7a1a"/>
+    <path d="M-14 -1.5 L-22.049999999999997 0 L-14 1.5 Z" fill="#ffe08a"/>
+    <use href="#plane-body" fill="#123222" stroke="#00ff66"/>
+  </g>
+<g transform="translate(488 64) scale(2.6)">
+    <path d="M-14 -3 L-25.200000000000003 0 L-14 3 Z" fill="#ff7a1a"/>
+    <path d="M-14 -1.5 L-19.6 0 L-14 1.5 Z" fill="#ffe08a"/>
+    <use href="#plane-body" fill="#123222" stroke="#00ff66"/>
+  </g>
+<g transform="translate(680 64) scale(2.6)">
+    <path d="M-14 -3 L-36.400000000000006 0 L-14 3 Z" fill="#4fc3ff"/>
+    <path d="M-14 -1.5 L-25.200000000000003 0 L-14 1.5 Z" fill="#e6fbff"/>
+    <use href="#plane-body" fill="#123222" stroke="#00ff66"/>
+  </g>
+<g transform="translate(872 64) scale(2.6)">
+    <path d="M-14 -3 L-30.8 0 L-14 3 Z" fill="#4fc3ff"/>
+    <path d="M-14 -1.5 L-22.4 0 L-14 1.5 Z" fill="#e6fbff"/>
+    <use href="#plane-body" fill="#123222" stroke="#00ff66"/>
+  </g>
+<g transform="translate(104 192) scale(2.6)">
+    
+    <use href="#plane-body" fill="#ff4d4d" stroke="#ffffff"/>
+  </g>
+<polygon points="303.3,192.0 304.4,223.1 278.0,240.2 247.8,249.1 226.9,225.6 201.7,208.0 208.9,178.2 226.9,158.4 249.6,147.7 280.3,138.7 305.1,160.4" fill="#221d19" stroke="#c8b49a" stroke-width="4" stroke-linejoin="round"/><circle cx="244.8" cy="189.8" r="9.4" fill="#1a1613" stroke="#6e604f" stroke-width="2"/><circle cx="240.5" cy="180.0" r="11.2" fill="#1a1613" stroke="#6e604f" stroke-width="2"/><circle cx="245.6" cy="197.9" r="11.8" fill="#1a1613" stroke="#6e604f" stroke-width="2"/>
+<polygon points="433.2,192.0 428.1,217.5 406.5,231.0 384.0,247.0 355.9,240.8 341.5,216.5 337.6,192.0 333.3,162.7 361.2,152.6 384.0,141.4 409.3,148.2 423.2,169.3" fill="#221d19" stroke="#c8b49a" stroke-width="4" stroke-linejoin="round"/><circle cx="395.8" cy="202.3" r="11.2" fill="#1a1613" stroke="#6e604f" stroke-width="2"/><circle cx="397.2" cy="199.7" r="12.4" fill="#1a1613" stroke="#6e604f" stroke-width="2"/><circle cx="382.5" cy="206.8" r="7.8" fill="#1a1613" stroke="#6e604f" stroke-width="2"/>
+<polygon points="560.4,192.0 557.5,215.9 542.9,236.8 517.8,240.0 495.7,235.1 469.4,229.7 460.4,204.7 464.0,180.2 468.0,153.0 493.9,144.3 517.6,146.0 539.0,152.9 563.0,165.2" fill="#221d19" stroke="#c8b49a" stroke-width="4" stroke-linejoin="round"/><circle cx="501.4" cy="185.5" r="6.4" fill="#1a1613" stroke="#6e604f" stroke-width="2"/><circle cx="507.9" cy="193.8" r="5.0" fill="#1a1613" stroke="#6e604f" stroke-width="2"/><circle cx="505.1" cy="174.1" r="6.2" fill="#1a1613" stroke="#6e604f" stroke-width="2"/>
+<g filter="url(#glow)">
+    <polygon points="72.0,304.0 60.0,324.8 36.0,324.8 24.0,304.0 36.0,283.2 60.0,283.2" fill="rgba(0,0,0,0.6)" stroke="#4fc3ff" stroke-width="4"/>
+    <g fill="#4fc3ff" stroke="#4fc3ff"><path d="M37 295 L46 304 L37 313 M48 295 L57 304 L48 313" fill="none" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></g>
+  </g>
+<g filter="url(#glow)">
+    <polygon points="168.0,304.0 156.0,324.8 132.0,324.8 120.0,304.0 132.0,283.2 156.0,283.2" fill="rgba(0,0,0,0.6)" stroke="#ffd23f" stroke-width="4"/>
+    <g fill="#ffd23f" stroke="#ffd23f"><path d="M140 299 L150 299 Q157 304 150 309 L140 309 Z" stroke="none"/><path d="M130 300 L136 300 M128 308 L136 308" stroke-width="3" stroke-linecap="round"/></g>
+  </g>
+<g filter="url(#glow)">
+    <polygon points="264.0,304.0 252.0,324.8 228.0,324.8 216.0,304.0 228.0,283.2 252.0,283.2" fill="rgba(0,0,0,0.6)" stroke="#5dff7a" stroke-width="4"/>
+    <g fill="#5dff7a" stroke="#5dff7a"><path d="M236 292 h8 v8 h8 v8 h-8 v8 h-8 v-8 h-8 v-8 h8 Z" stroke="none"/></g>
+  </g>
+<g filter="url(#glow-bullet)">
+    <rect x="296" y="263" width="34" height="10" rx="5" fill="#ffc21a"/>
+    <rect x="307.9" y="265.5" width="20.4" height="5" rx="2.5" fill="#ffffff"/>
+  </g>
+<g filter="url(#glow-bullet)">
+    <rect x="296" y="295" width="62" height="10" rx="5" fill="#4fe3ff"/>
+    <rect x="317.7" y="297.5" width="37.199999999999996" height="5" rx="2.5" fill="#ffffff"/>
+  </g>
+</svg>

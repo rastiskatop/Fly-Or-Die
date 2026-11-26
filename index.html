@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FlyOrDie</title>
     <style>
+      :root {
+        --neon: #00ff66;
+        --panel: rgba(6, 14, 10, 0.94);
+        --muted: #7a8a80;
+        --danger: #ff4d4d;
+        --warn: #ff9a4d;
+      }
       body {
         margin: 0;
         background: #111;
@@ -13,15 +20,178 @@
         align-items: center;
         height: 100vh;
         color: white;
+        font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+        overflow: hidden;
       }
       canvas {
         background: #000;
         box-shadow: 0 0 20px rgba(0, 255, 100, 0.2);
       }
+
+      /* ---------- lobby overlay ---------- */
+      #lobby {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.55);
+      }
+      #lobby[hidden] {
+        display: none;
+      }
+      .lobby-panel {
+        width: min(560px, calc(100vw - 32px));
+        max-height: calc(100vh - 32px);
+        overflow: auto;
+        background: var(--panel);
+        border: 1px solid var(--neon);
+        box-shadow: 0 0 30px rgba(0, 255, 100, 0.25);
+        padding: 24px;
+        box-sizing: border-box;
+      }
+      .lobby-panel h1 {
+        margin: 0 0 4px;
+        color: var(--neon);
+        letter-spacing: 4px;
+        font-size: 32px;
+      }
+      .lobby-panel .sub {
+        color: var(--muted);
+        margin: 0 0 20px;
+        font-size: 13px;
+      }
+      label {
+        display: block;
+        font-size: 13px;
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+      #pilot-name {
+        width: 100%;
+        box-sizing: border-box;
+        background: #000;
+        border: 1px solid #2c4a38;
+        color: var(--neon);
+        font: inherit;
+        font-size: 16px;
+        padding: 8px 10px;
+        margin-bottom: 18px;
+      }
+      #pilot-name:focus {
+        outline: none;
+        border-color: var(--neon);
+      }
+      .rooms-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+      }
+      .rooms-head h2 {
+        margin: 0;
+        font-size: 16px;
+      }
+      button {
+        font: inherit;
+        background: transparent;
+        color: var(--neon);
+        border: 1px solid var(--neon);
+        padding: 6px 14px;
+        cursor: pointer;
+      }
+      button:hover:not(:disabled) {
+        background: var(--neon);
+        color: #000;
+      }
+      button:disabled {
+        color: #555;
+        border-color: #333;
+        cursor: not-allowed;
+      }
+      #room-list {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+      }
+      #room-list li {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 10px 0;
+        border-top: 1px solid #1d2b23;
+      }
+      #room-list li.empty {
+        color: var(--muted);
+      }
+      .room-main {
+        flex: 1;
+        min-width: 0;
+      }
+      .room-name {
+        display: block;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .room-meta {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .room-players {
+        color: var(--neon);
+        font-variant-numeric: tabular-nums;
+      }
+      .room.full .room-players {
+        color: var(--danger);
+      }
+      #lobby-status {
+        margin-top: 12px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      #lobby-status.busy::after {
+        content: ' ⟳';
+      }
+      #lobby-error {
+        margin-top: 10px;
+        color: var(--danger);
+        font-size: 13px;
+      }
+      #lobby-notices {
+        margin: 0 0 16px;
+        padding: 8px 12px 8px 28px;
+        border: 1px solid var(--warn);
+        color: var(--warn);
+        font-size: 12px;
+      }
+      #lobby-notices[hidden],
+      #lobby-error[hidden] {
+        display: none;
+      }
     </style>
   </head>
   <body>
     <canvas id="gameCanvas"></canvas>
-    <script type="module" src="/src/main.js"></script>
+
+    <div id="lobby" hidden>
+      <div class="lobby-panel">
+        <h1>FLY OR DIE</h1>
+        <p class="sub">Pick a pilot name and a room.</p>
+        <ul id="lobby-notices" hidden></ul>
+        <label for="pilot-name">Pilot name</label>
+        <input id="pilot-name" maxlength="16" autocomplete="off" spellcheck="false" />
+        <div class="rooms-head">
+          <h2>Rooms</h2>
+          <button type="button" id="lobby-refresh">Refresh</button>
+        </div>
+        <ul id="room-list"></ul>
+        <div id="lobby-error" hidden></div>
+        <div id="lobby-status"></div>
+      </div>
+    </div>
+
+    <!-- relative path: works on Vite, on any static server and under a sub-path -->
+    <script type="module" src="./src/main.js"></script>
   </body>
 </html>

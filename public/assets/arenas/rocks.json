@@ -1,0 +1,12 @@
+{
+  "id": "rocks",
+  "name": "Asteroid Belt",
+  "seed": 77,
+  "asteroidMass": 7,
+  "initialAsteroids": 6,
+  "seekerChance": 0.5,
+  "pickupEvery": 6,
+  "maxPickups": 3,
+  "background": "#07040a",
+  "grid": "#21152a"
+}

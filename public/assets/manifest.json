@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "atlas": { "url": "sprites/sheet.json" },
+  "images": {
+    "sheet": { "url": "sprites/sheet.svg" }
+  },
+  "sounds": {
+    "shoot": { "url": "sounds/shoot.wav" },
+    "shoot_fast": { "url": "sounds/shoot_fast.wav" },
+    "hit": { "url": "sounds/hit.wav" },
+    "explode": { "url": "sounds/explode.wav" },
+    "explode_big": { "url": "sounds/explode_big.wav" },
+    "pickup": { "url": "sounds/pickup.wav" },
+    "respawn": { "url": "sounds/respawn.wav" }
+  },
+  "arenas": {
+    "classic": { "url": "arenas/classic.json" },
+    "rocks": { "url": "arenas/rocks.json" },
+    "calm": { "url": "arenas/calm.json" }
+  }
+}

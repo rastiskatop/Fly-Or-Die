@@ -7,30 +7,42 @@ import { Pickup, PICKUP_TYPES } from './pickup.js';
 import { Vector2 } from './vector.js';
 import { homing } from './components.js';
 
-const TARGET_ASTEROID_MASS = 4; // "big-asteroid equivalents" kept on the field
-const MAX_PICKUPS = 2;
-const PICKUP_EVERY = 9; // s
 const PICKUP_DROP_CHANCE = 0.12;
-const SEEKER_CHANCE = 0.3;
 
-export function createGame({ width, height, seed = 2026 }) {
-  const world = new World({ width, height, seed, onCollision });
-  const player = world.spawn(new Ship({ x: width / 2, y: height / 2, name: 'P1' }));
+// Used when the arena file is missing or corrupt (Lab 3 failure gallery: the game still starts).
+export const DEFAULT_ARENA = Object.freeze({
+  id: 'default',
+  name: 'Default',
+  seed: 2026,
+  asteroidMass: 4, // "big-asteroid equivalents" kept on the field
+  initialAsteroids: 3,
+  seekerChance: 0.3,
+  pickupEvery: 9, // s
+  maxPickups: 2,
+  background: '#000000',
+  grid: '#1a1a1a',
+});
 
-  let pickupTimer = PICKUP_EVERY;
+export function createGame({ width, height, arena = DEFAULT_ARENA, playerName = 'P1' }) {
+  const rules = { ...DEFAULT_ARENA, ...arena };
+  const world = new World({ width, height, seed: rules.seed, onCollision });
+  world.rules = rules;
+  const player = world.spawn(new Ship({ x: width / 2, y: height / 2, name: playerName }));
+
+  let pickupTimer = rules.pickupEvery;
   world.systems.push(function director(w, dt) {
     let mass = 0;
     for (const a of w.ofKind('asteroid')) if (a.alive) mass += a.size / 3;
-    if (mass < TARGET_ASTEROID_MASS) spawnAsteroidAtEdge(w);
+    if (mass < rules.asteroidMass) spawnAsteroidAtEdge(w);
 
     pickupTimer -= dt;
     if (pickupTimer <= 0) {
-      pickupTimer = PICKUP_EVERY;
-      if (w.countOfKind('pickup') < MAX_PICKUPS) spawnRandomPickup(w);
+      pickupTimer = rules.pickupEvery;
+      if (w.countOfKind('pickup') < rules.maxPickups) spawnRandomPickup(w);
     }
   });
 
-  for (let i = 0; i < 3; i++) spawnAsteroidAtEdge(world);
+  for (let i = 0; i < rules.initialAsteroids; i++) spawnAsteroidAtEdge(world);
   return { world, player };
 }
 
@@ -76,7 +88,13 @@ function explode(world, e, color, count) {
 function destroyAsteroid(world, asteroid, killerShip) {
   world.despawn(asteroid.id);
   explode(world, asteroid, '#c8b49a', 10 + asteroid.size * 8);
-  if (killerShip) killerShip.score += ASTEROID_SCORE[asteroid.size];
+  const { x, y } = asteroid.pos;
+  world.emit('exploded', { kind: 'asteroid', size: asteroid.size, x, y });
+  if (killerShip) {
+    const points = ASTEROID_SCORE[asteroid.size];
+    killerShip.score += points;
+    world.emit('scored', { shipId: killerShip.id, points, total: killerShip.score, x, y });
+  }
 
   if (asteroid.size > 1) {
     for (const sign of [-1, 1]) {
@@ -91,7 +109,7 @@ function destroyAsteroid(world, asteroid, killerShip) {
         rng: world.rng,
       });
       // Composition: some fragments become seekers by GETTING a component, not a new subclass.
-      if (child.size === 2 && world.rng() < SEEKER_CHANCE) {
+      if (child.size === 2 && world.rng() < world.rules.seekerChance) {
         child.homing = homing({ targetKinds: ['ship'], turnRate: 0.7, range: 600 });
       }
       world.spawn(child);
@@ -130,10 +148,30 @@ function bounceApart(a, b, restitution = 1) {
   return -rel; // impact speed
 }
 
+/** @returns {boolean} true if the ship was destroyed */
+function damageShip(world, ship, amount) {
+  const hpBefore = ship.hp;
+  const killed = ship.damage(amount);
+  const { x, y } = ship.pos;
+  if (killed) {
+    explode(world, ship, '#ff7a1a', 60);
+    world.emit('exploded', { kind: 'ship', shipId: ship.id, x, y });
+  } else if (ship.hp < hpBefore) {
+    world.emit('hit', { kind: 'ship', id: ship.id, damage: hpBefore - ship.hp, x, y });
+  }
+  return killed;
+}
+
 function consumePickup(holder, ship, world) {
   if (ship.destroyed) return;
   ship.applyPickup(holder.pickup.effect, holder.pickup.duration);
   world.despawn(holder.id);
+  world.emit('pickup', {
+    shipId: ship.id,
+    effect: holder.pickup.effect,
+    x: ship.pos.x,
+    y: ship.pos.y,
+  });
 }
 
 // Collision handler: dispatch on the PAIR of kinds. Pairs arrive in arbitrary order,
@@ -145,6 +183,8 @@ const handlers = {
     world.despawn(bullet.id);
     if (asteroid.damage(bullet.damage)) {
       destroyAsteroid(world, asteroid, world.get(bullet.ownerId));
+    } else {
+      world.emit('hit', { kind: 'asteroid', id: asteroid.id, x: bullet.pos.x, y: bullet.pos.y });
     }
   },
 
@@ -152,17 +192,19 @@ const handlers = {
     const impact = bounceApart(asteroid, ship, 0.6);
     if (ship.shielded) return;
     const dmg = Math.round(10 + asteroid.size * 8 + impact * 0.05);
-    if (ship.damage(dmg)) explode(world, ship, '#ff7a1a', 60);
+    damageShip(world, ship, dmg);
   },
 
   'bullet|ship': (bullet, ship, world) => {
     if (bullet.ownerId === ship.id) return; // can't shoot yourself
     world.despawn(bullet.id);
-    const killed = ship.damage(bullet.damage);
-    if (killed) {
-      explode(world, ship, '#ff7a1a', 60);
+    if (damageShip(world, ship, bullet.damage)) {
       const shooter = world.get(bullet.ownerId);
-      if (shooter) shooter.score += 100;
+      if (shooter) {
+        shooter.score += 100;
+        const { x, y } = ship.pos;
+        world.emit('scored', { shipId: shooter.id, points: 100, total: shooter.score, x, y });
+      }
     }
   },
 };
