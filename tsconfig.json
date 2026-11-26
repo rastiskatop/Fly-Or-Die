@@ -1,0 +1,7 @@
+{
+  // Root project: the repo-level Node scripts (scripts/dev.ts). Each workspace has its own
+  // tsconfig; `npm run typecheck` checks this one and then every workspace.
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": { "lib": ["ES2023"], "types": ["node"] },
+  "include": ["scripts"]
+}

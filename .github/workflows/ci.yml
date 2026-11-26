@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      # Any TypeScript error fails the build (shared, client incl. tools, server incl. scripts).
+      - run: npm run typecheck
+      # typescript-eslint, no-explicit-any = error.
+      - run: npm run lint
+      # node --test on .ts files (Node's built-in type stripping) — shared + server.
+      - run: npm test
+      # The client must still bundle.
+      - run: npm run build

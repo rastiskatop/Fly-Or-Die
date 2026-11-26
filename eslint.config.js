@@ -1,35 +1,29 @@
 import js from '@eslint/js';
 import globals from 'globals';
+import tseslint from 'typescript-eslint';
 import prettier from 'eslint-config-prettier';
 
-export default [
+export default tseslint.config(
   { ignores: ['**/dist/', '**/node_modules/', 'server/logs/'] },
   js.configs.recommended,
+  ...tseslint.configs.recommended, // includes no-explicit-any: zero `any` is enforced, not hoped for
   {
-    // Browser code
-    files: ['client/src/**/*.js'],
-    languageOptions: { ecmaVersion: 2024, sourceType: 'module', globals: globals.browser },
+    files: ['client/src/**/*.ts'],
+    languageOptions: { globals: globals.browser },
   },
   {
-    // Node code: the server, build config, asset generators, repo scripts
-    files: [
-      'server/**/*.js',
-      'server/**/*.mjs',
-      'client/vite.config.js',
-      'client/tools/**/*.mjs',
-      'scripts/**/*.mjs',
-      '*.js',
-    ],
-    languageOptions: { ecmaVersion: 2024, sourceType: 'module', globals: globals.node },
+    files: ['server/**/*.ts', 'client/vite.config.ts', 'client/tools/**/*.ts', 'scripts/**/*.mjs', '*.js'],
+    languageOptions: { globals: globals.node },
   },
   {
-    // Shared simulation/protocol: runs in BOTH runtimes → only globals common to Node and browsers
-    files: ['shared/**/*.js'],
-    languageOptions: {
-      ecmaVersion: 2024,
-      sourceType: 'module',
-      globals: globals['shared-node-browser'],
+    files: ['shared/**/*.ts'],
+    languageOptions: { globals: globals['shared-node-browser'] },
+  },
+  {
+    rules: {
+      '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_' }],
+      '@typescript-eslint/consistent-type-imports': 'error',
     },
   },
   prettier,
-];
+);

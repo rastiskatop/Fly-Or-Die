@@ -1,0 +1,24 @@
+{
+  // Shared compiler settings (after Matt Pocock's tsconfig cheat sheet).
+  // tsc only CHECKS: Vite (client) and Node's native type stripping (server, shared) run the .ts
+  // files directly — hence noEmit, allowImportingTsExtensions and erasableSyntaxOnly
+  // (no enum / namespace / parameter properties: syntax Node can't just strip away).
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "erasableSyntaxOnly": true,
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "useUnknownInCatchVariables": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true
+  }
+}

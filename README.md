@@ -4,7 +4,7 @@
 
 _Two independent clients (left: Red, right: Blue) on one authoritative Node server, both with 100 ms ±30 ms injected latency and 2% loss. Each client predicts its own plane, interpolates the other one ~100 ms in the past, and talks a binary `DataView` protocol at 30 Hz. The overlay is the netgraph._
 
-**Quick start:** `npm install`, then `npm run dev`, then open http://localhost:5173 in two windows and join the same battlefield. Or run `npm start` and open http://localhost:8787. Tests: `npm test` (26).
+**Quick start:** `npm install`, then `npm run dev`, then open http://localhost:5173 in two windows and join the same battlefield. Or run `npm start` and open http://localhost:8787. Checks: `npm run typecheck`, `npm run lint`, `npm test` (28). Since Lab 6 everything is TypeScript (Node ≥ 22.18 runs the server's `.ts` files directly). VS Code Live Server serves the **built** client, so run `npm run build` once first.
 
 > **Windows PowerShell:** if `npm` fails with *"running scripts is disabled on this system"* (`npm.ps1` is blocked by the default execution policy), run `npm.cmd run dev` / `npm.cmd start` instead, or allow local scripts once with `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
@@ -749,3 +749,143 @@ SNAPSHOT  u8 type=2 · u8 version=1 · u32 tick · u32 ack · u16 entityCount ·
 **Знайдений баг детермінізму:** Chrome 156 і Node 24 повертають різні біти з `Math.sin`, `cos`, `atan2`, `exp`, тож хеш симуляції відрізнявся. Виправлено власною тригонометрією `dmath.js` лише на `+ − × ÷`: тепер хеш однаковий (`b736f092`).
 
 **Таймер:** `setInterval(33)` на Windows дав 25,8 Гц, таймер з абсолютною ціллю — 29,96 Гц.
+
+---
+
+# FlyOrDie (Lab 6) — TypeScript: one typed protocol, both sides of the wire
+
+Every package is TypeScript under `strict` + `noUncheckedIndexedAccess` + `verbatimModuleSyntax`. The runtime did not change: the determinism hash is still **`b736f092`**, as in Lab 5, and the netcode bench gives the same numbers.
+
+## Toolchain
+
+| What | How |
+| --- | --- |
+| Settings | `tsconfig.base.json` (after Matt Pocock's cheat sheet) + one `tsconfig.json` per package: `shared` (no DOM, no Node types: the sim can't touch either), `client` (DOM), `client/tsconfig.node.json` (Vite config, asset generators), `server`, `server/scripts` (Node + DOM: they run the browser netcode headless), root (`scripts/dev.ts`) |
+| Checking | `npm run typecheck`: `tsc` (noEmit) for the root and every workspace. Vite only strips types, it never checks them |
+| Running | Client: Vite. Server, shared, tests, scripts: **Node's native type stripping** (`node src/index.ts`, `node --test "test/**/*.test.ts"`), no build step. So `erasableSyntaxOnly`: no `enum`, no parameter properties; unions of literals `as const` instead |
+| Lint | `typescript-eslint` (flat config): `no-explicit-any`, `consistent-type-imports`, unused vars |
+| CI | `.github/workflows/ci.yml`: `npm ci` → `typecheck` → `lint` → `test` → `build` |
+| Live Server | a browser can't run `.ts`, so the root `index.html` now forwards to the **built** `client/dist/` (or says "run `npm run build`" if it isn't there). The old import map is gone |
+
+## Where types meet the wire: zod at every boundary
+
+`shared/src/net/messages.ts` and `protocol.ts` hold **zod schemas**. Types are inferred from them (`type ClientMessage = z.infer<typeof ClientMessageSchema>`), so a schema and its type can't drift apart. Everything that comes from outside the program is `unknown` until a schema has parsed it:
+
+| Boundary | Parsed by |
+| --- | --- |
+| WebSocket text frame (server) | `parseClientMessage(text)` → `Result<ClientMessage, Rejection>`, never throws. Lab 4's hand-written validator is deleted |
+| WebSocket binary frame (server) | the binary decoder *is* the validator: version byte, length checks (`need()`), `InputSchema.parse` per input, no trailing bytes |
+| WebSocket messages (client) | `ServerMessageSchema.safeParse` in `Connection`. Invalid messages are logged and dropped |
+| Snapshots | JSON: `SnapshotSchema`. Binary: the decoder |
+| HTTP bodies, `/api/rooms` responses, `/health` | `CreateRoomBodySchema`, `RoomsResponseSchema`, `HealthSchema` |
+| Environment | `EnvSchema` with `z.coerce` + defaults → frozen `ServerConfig` |
+| Arena files, asset manifest, sprite atlas | `ArenaSchema`, `ManifestSchema`, `AtlasSchema` |
+| IPC from a forked server (tests, scripts) | `ListeningSchema` |
+
+`JSON.parse` and `res.json()` return `any`. Every call is pinned to `unknown` right away (`const data: unknown = JSON.parse(text)`). In `catch (err: unknown)`, errors are narrowed with `instanceof Error` before use.
+
+## What TypeScript found
+
+1. **Score for a rock.** `world.get(bullet.ownerId)` returns *any* entity. Ids wrap at 65 535, so once the shooter has despawned, its id can belong to an asteroid. The code then did `shooter.score += 100` on that asteroid. Fix: `shooterOf()` checks `kind === 'ship'`.
+2. **A field nobody declared.** `scored` events carried `total`, but no protocol, codec or HUD knew about it: the binary codec silently dropped it. Typing `GameEvents` made it an excess-property error, so the field was deleted.
+3. **Arena files trusted blindly.** The server `JSON.parse`d `arenas/*.json` and handed the result to the match. A typo in `terrain` would only have shown up as a broken background. Now `ArenaSchema.safeParse` runs and logs a clear error.
+4. **`entities: undefined` online.** `createHud(world)` read `world.size` for the entity counter. Online it was handed `net.bus`, an `EventTarget` with no `size`, so the HUD printed `entities: undefined` in every online match. Typing the parameter as `Bus<GameEvents>` made `.size` an error. The count is now an explicit `entities` field of the HUD frame.
+5. **Ids, ticks and seqs were interchangeable.** All three were plain `number`s in Lab 5. Branded types now make passing a `Tick` where an `EntityId` or `Seq` is expected a compile error. That includes the hard-coded `ack: 12345` in the codec benchmark, which now has to go through `asSeq()`.
+6. **`Omit` on a union is not distributive.** `Omit<ClientMessage, 'v'>` collapsed the union into the fields common to *all* messages, so `send({ type: 'chat', text })` would have accepted `text` on any message type. Fix: `DistributiveOmit` (below).
+7. **Nullables nobody handled:** `req.url` (`string | undefined`), `server.address()` (`string | AddressInfo | null`), `child.stdout` (`null` unless piped), `process.send` (absent when not forked), and `clearTimeout(null)` on a timer that was never set.
+8. **Dead paths invisible to the compiler:** after the rename, `fork('src/index.js')` in tests and scripts pointed at a file that no longer existed. Strings aren't checked, so the tests showed it, not `tsc`. The scripts now share one typed `forkServer()`.
+9. **Pages that weren't checked at all.** `duel.html` had its program inline, and the headless `netcode-bench` script was plain JS. Both still called the Lab 5 API (`addEventListener`, `net.bus`, `receive(JSON.stringify(…))`), and the HUD frame lacked its new `entities` field. Moving the inline script into `src/experiments/duel.ts` and typing the scripts made `tsc` list every stale call.
+10. **Byte views vs. byte buffers.** The `Codec` interface used one `Frame` type for both directions. A received Node `Buffer` is a *view* into a shared pool (`ArrayBufferLike`), while an encoded frame owns a fresh `ArrayBuffer`. That is exactly why the decoder already respects `byteOffset`. Now it's `Codec<Out, In>`.
+11. **`noUncheckedIndexedAccess` paid rent:** regex groups in `vite.config.ts` (`m[2]`), WAV sample arrays in the sound generator, `sorted[median]` in the benchmarks. Each was an `undefined` the code had silently assumed away.
+
+Items 1, 3, 4, 7 and 10 aren't "type errors" in the naive sense: they are missing runtime checks that the types made visible.
+
+## Three types, explained for a JavaScript developer
+
+**1. Server events built from the message union** (`shared/src/net/messages.ts`)
+
+```ts
+export type ServerEvents = { [M in ServerMessage as M['type']]: M };
+```
+
+`ServerMessage` is a union of objects, each with a different `type` string (`'welcome' | 'roster' | 'chat' | …`). The type above loops over that union (`M in ServerMessage`) and makes an object type whose **keys** are each message's `type` and whose **values** are the message itself: `{ welcome: WelcomeMsg; roster: RosterMsg; … }`. `Connection` hands this to the generic `Bus`, so `conn.on('roster', m => m.players)` knows `m` is a roster message. If someone adds a server message to the schema, a new event name appears automatically, and the exhaustive `switch` in `Connection.#dispatch` fails to compile until it is handled.
+
+**2. A generic event bus that links a name to its payload** (`shared/src/bus.ts`)
+
+```ts
+class Bus<E extends object> {
+  on<K extends keyof E>(name: K, fn: (payload: E[K]) => void): () => void
+  emit<K extends keyof E>(name: K, payload: E[K]): void
+}
+```
+
+`E` is a "dictionary" type such as `{ fired: {...}; hit: {...} }`. `K extends keyof E` means "`name` must be one of E's keys", and `E[K]` means "the payload is whatever E says for *that* key". The two are tied by `K`: `bus.emit('hit', { shipId })` is checked against `hit`'s payload and nothing else. One class serves `World` (`GameEvents`), `NetGame`, `Lobby` (`LobbyEvents`) and `Connection` (`ConnectionEvents`). This is the codebase's only `as` cast: the internal `Map` can't remember which listener type sits under which key (see below).
+
+**3. `DistributiveOmit`** (`shared/src/net/messages.ts`)
+
+```ts
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+```
+
+The client never writes the protocol version `v` by hand (`Connection` adds it), so outgoing messages are "a message minus `v`". The built-in `Omit<A | B, 'v'>` first merges `A | B` into one object with only their *common* fields, which loses the union. `T extends unknown ? … : never` looks like a no-op, but a conditional type on a bare type parameter is applied **to each member of a union separately**. So we get `Omit<A,'v'> | Omit<B,'v'>`, and `send({ type: 'chat', text })` is still checked as a *chat* message.
+
+Also worth a look:
+- **Branded ids:** `z.number().brand<'EntityId'>()`, zero runtime cost. `asEntityId(n)` *parses* instead of casting.
+- `EntityOfKind<K> = Extract<AnyEntity, { kind: K }>`, which makes `world.ofKind('ship')` yield `Ship` with no cast.
+- `GameEvent`, a mapped type that turns the `GameEvents` dictionary into a discriminated union for the snapshot encoder.
+- `PICKUP_TYPES` declared `as const satisfies readonly PickupDef[]`.
+- `PredictedShip` in `netgame.ts`: a mutable object, never declared as `DrawableShip`, that the renderer accepts **structurally**. It is checked once, at compile time, by an unused `_drawable` assignment.
+
+## `as` casts: 1 (limit 5)
+
+| Where | Why it's sound |
+| --- | --- |
+| `shared/src/bus.ts`: `(fn as Listener<E[K]>)(payload)` | The listener map is `Map<keyof E, Set<Listener<never>>>`. A `Map` can't express "the value type depends on the key". `on()` is the only writer and only stores a `Listener<E[K]>` under key `K`, so reading it back under `K` is safe |
+
+Zero `any`, zero `!` non-null assertions, zero `@ts-ignore`/`@ts-expect-error` (checked with `grep`). `as const` isn't a cast.
+
+## Framework decision: no framework (for now)
+
+The lobby and HUD stay vanilla. The HUD is drawn on the **canvas** every frame, so a DOM framework would add nothing there. The lobby is one list, one form and a chat panel. It is already driven by a typed `Bus<LobbyEvents>` and rendered by `lobby-view.ts`, with an `el(root, selector, Type)` helper that checks every element with `instanceof`. A framework would bring components and reactivity for those ~200 lines. It would cost a second build pipeline (Svelte/Vue compilers or JSX), a runtime in the bundle (now **183 KB min / 59 KB gzip**, mostly zod and the game), and a second way of handling events alongside the game's `Bus`. If the lobby grows (friends, settings, matchmaking), Svelte is the first candidate: the smallest runtime, and its stores map naturally onto the existing `Bus`.
+
+## Reflection answers (short)
+
+1. **Structural typing:** compatibility comes from shape, not from declared names. The offline `Ship` class and the online `PredictedShip` (a plain object) share no base class or `implements`. Both are accepted wherever a `DrawableShip` is expected, because they have the fields. In C#/Java they'd need a common interface declared on both.
+2. **`any` vs `unknown`:** `any` allows everything and spreads. `unknown` allows nothing until you narrow it. `unknown` enters through `JSON.parse`, `res.json()`, `catch`, WebSocket frames, `process.env`, IPC and files. It leaves only through a zod schema, a type guard or a validating decoder.
+3. **Exhaustiveness:** the `const x: never = msg` default compiles only if every member of the union was handled above it. When a new message type is added, `msg` is no longer `never` there, so the build fails at that exact line. See `Connection.#dispatch`, `ws.ts` and `snapshotEntities`.
+4. **`{ type: 'input', turn: 1e9 }`:** types are erased, so the check lives at the boundary: `ClientMessageSchema` (buttons `0..31` as an int, `seq` range, `max(8)` inputs) and the binary decoder. Only one place can be trusted, the server's entry point. Everything behind it then works with typed, valid data.
+5. **Branded type:** `type Seq = number & z.$brand<'Seq'>`, built by `asSeq(n)`, which validates instead of casting. A bare `12345` or a `Tick` can no longer be passed as an input's `seq` or a snapshot's `ack` (finding 5).
+6. **Generics:** use them when the output type depends on the input type. In the `Bus`, `K extends keyof E` constrains the name and `E[K]` derives the payload from it (type 2 above).
+7. **Vite doesn't type-check:** it transpiles each file on its own (esbuild/oxc) for speed and never builds a whole-program view. Checking is done by `tsc --noEmit` in `npm run typecheck`, in the editor, and in CI.
+8. **Three bugs:** the asteroid that got a shooter's score, the online HUD that printed `entities: undefined`, and unvalidated arena files. None is a "wrong type" error in the naive sense: they are a missing kind check, a wrong object passed in, and a missing runtime check.
+9. **When `as` is OK:** when you know something the type system can't express, and you write down why. Our single case is the key-dependent `Map` in `Bus`. Everywhere else, a guard, a schema or a better type replaced the cast.
+
+---
+
+# FlyOrDie (Лабораторна 6) — TypeScript
+
+**Що зроблено:**
+
+- Увесь код (`shared`, `client`, `server`, тести, скрипти, інструменти) переписано на TypeScript у режимі `strict` + `noUncheckedIndexedAccess` + `verbatimModuleSyntax`.
+- Перевірку запускає `npm run typecheck`. CI (GitHub Actions) виконує typecheck, lint, тести й збірку.
+- Сервер і тести запускаються через вбудоване в Node видалення типів, без окремої збірки.
+- Протокол описано схемами zod, з яких виводяться типи. Кожне повідомлення, тіло запиту, змінна середовища та JSON-файл перевіряються під час виконання. Старий ручний валідатор видалено.
+- Бінарний декодер сам є валідатором: він перевіряє версію, довжини й діапазони.
+- Ідентифікатори брендовані (`EntityId`, `Tick`, `Seq`), а `Vector2` незмінний.
+- Шина подій узагальнена: `Bus<E>`.
+- Кожен `switch` за `type` чи `kind` закінчується перевіркою `never`.
+
+**Результат:** 0 помилок типів, 0 `any`, 1 обґрунтований `as`. Хеш детермінізму не змінився (`b736f092`), 28 тестів проходять.
+
+**Що знайшов TypeScript:**
+
+- Очки за збиту ціль могли нарахуватися астероїду, якщо id стрільця вже належав іншій сутності.
+- Поле `total`, якого немає в протоколі.
+- Файли арен не перевірялися.
+- Онлайн HUD показував `entities: undefined`.
+- Застарілі виклики API в `duel.html` та бенчмарку.
+- Різниця між байтовим «видом» і буфером у кодеку.
+
+**Фреймворк:** не використовується. HUD малюється на canvas. Лобі невелике й уже працює через типізовану шину. Фреймворк додав би ще один збирач і власне середовище виконання в бандл.
+
+**Live Server:** браузер не виконує `.ts`. Тому кореневий `index.html` відкриває зібрану версію з `client/dist` або підказує спершу виконати `npm run build`.

@@ -365,12 +365,8 @@
       <div id="chat-status"></div>
     </aside>
 
-    <!-- Bare imports of the shared workspace package. Vite resolves them itself (and bundles them in the
-         build); a plain static server (VS Code Live Server) uses this import map instead. -->
-    <script type="importmap">
-      { "imports": { "@flyordie/shared/": "../shared/src/" } }
-    </script>
-    <!-- relative path: works on Vite, on any static server and under a sub-path -->
-    <script type="module" src="./src/main.js"></script>
+    <!-- TypeScript entry: Vite compiles it in dev and bundles it in the build (client/dist), which is
+         what static servers (VS Code Live Server, GitHub Pages) serve. Relative: works under a sub-path. -->
+    <script type="module" src="./src/main.ts"></script>
   </body>
 </html>

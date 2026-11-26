@@ -1,14 +1,51 @@
 <!doctype html>
 <!-- Repo root. The game lives in client/ (npm workspaces since Lab 4).
-     This page only exists so that VS Code Live Server ("Go Live" on the project folder) or any
-     static server started in the repo root lands on the game. -->
+     Since Lab 6 the client is TypeScript: a browser can't run client/src/*.ts directly, so a plain
+     static server (VS Code Live Server "Go Live", python -m http.server, …) serves the BUILT game
+     from client/dist. This page sends you there, or tells you to build it first. -->
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="refresh" content="0; url=./client/index.html" />
     <title>FlyOrDie</title>
+    <style>
+      body {
+        background: #1a1712;
+        color: #e8dcb5;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        max-width: 640px;
+        margin: 10vh auto;
+        padding: 0 16px;
+      }
+      code {
+        background: #2c281f;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+      a {
+        color: #d9b44a;
+      }
+    </style>
   </head>
-  <body style="background: #111; color: #0f6; font-family: monospace">
-    <a href="./client/index.html">FlyOrDie → client/index.html</a>
+  <body>
+    <h1>FlyOrDie</h1>
+    <p id="msg">Looking for the built game…</p>
+    <script>
+      const target = './client/dist/index.html';
+      fetch(target, { method: 'HEAD', cache: 'no-store' })
+        .then((res) => {
+          if (!res.ok) throw new Error(String(res.status));
+          location.replace(target);
+        })
+        .catch(() => {
+          document.getElementById('msg').innerHTML =
+            'The client is TypeScript and has not been built yet. In a terminal, run ' +
+            '<code>npm install</code> then <code>npm run build</code>, and reload this page.<br><br>' +
+            'For the full game with the multiplayer server use <code>npm run dev</code> ' +
+            '(opens <a href="http://localhost:5173/">localhost:5173</a>) or <code>npm start</code> ' +
+            '(<a href="http://localhost:8787/">localhost:8787</a>).';
+        });
+    </script>
   </body>
 </html>

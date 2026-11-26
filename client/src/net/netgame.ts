@@ -1,0 +1,596 @@
+import { Vector2 } from '@flyordie/shared/sim/vector.ts';
+import { World } from '@flyordie/shared/sim/world.ts';
+import { Explosion } from '@flyordie/shared/sim/explosion.ts';
+import { ASTEROID_RADIUS } from '@flyordie/shared/sim/asteroid.ts';
+import {
+  stepShipMotion,
+  FIRE_COOLDOWN_S,
+  BULLET_SPEEDS,
+  type Bounds,
+  type ShipEffect,
+  type ShipMotionState,
+} from '@flyordie/shared/sim/ship.ts';
+import {
+  TICK_RATE,
+  DT,
+  INPUT_REDUNDANCY,
+  buttonsToControls,
+  type EntityState,
+  type Input,
+  type ShipState,
+  type Snapshot,
+} from '@flyordie/shared/net/protocol.ts';
+import { binaryCodec, codecFor, type AnyCodec } from '@flyordie/shared/net/codec.ts';
+import type { CodecName, RosterPlayer } from '@flyordie/shared/net/messages.ts';
+import { Bus } from '@flyordie/shared/bus.ts';
+import type { GameEvent, GameEvents } from '@flyordie/shared/sim/events.ts';
+import { asSeq, type EntityId, type Seq } from '@flyordie/shared/ids.ts';
+import type { Connection } from './connection.ts';
+import type {
+  Drawable,
+  DrawableBullet,
+  DrawableKind,
+  DrawableShip,
+  RenderWorld,
+} from '../render/types.ts';
+import type { HudPlayer } from '../render/hud.ts';
+
+const TICK_MS = 1000 / TICK_RATE;
+const SMOOTH_TAU_S = 0.035; // correction smoothing time constant: ~95% gone after 100 ms
+const TELEPORT_PX = 120; // corrections bigger than this (respawn, wrap) snap instead of smoothing
+const BULLET_TTL = 1.2;
+const MAX_SNAPSHOTS = 60; // 2 s of history at 30 Hz
+
+/** A received snapshot plus what we need to interpolate it. */
+interface SnapSlot extends Snapshot {
+  readonly recvAt: number;
+  readonly byId: ReadonlyMap<EntityId, EntityState>;
+}
+
+/**
+ * Our predicted plane: everything stepShipMotion needs (mutable), plus what the renderer and HUD
+ * read. It isn't declared as a DrawableShip/HudPlayer — it just has the right shape, and being
+ * mutable it is assignable to those read-only views (checked where it's used).
+ */
+type PredictedShip = ShipMotionState & {
+  readonly kind: 'ship';
+  readonly id: EntityId;
+  prevPos: Vector2;
+  prevAngle: number;
+  hp: number;
+  score: number;
+  deaths: number;
+  destroyed: boolean;
+  respawnIn: number;
+  hitFlash: number;
+  name: string;
+  readonly radius: number;
+  readonly alive: boolean;
+  readonly maxHp: number;
+};
+
+// Compile-time proof that a PredictedShip can be drawn and shown in the HUD.
+const _drawable = (s: PredictedShip): DrawableShip & HudPlayer => s;
+void _drawable;
+
+interface PredictedBullet extends DrawableBullet {
+  readonly id: string;
+  pos: Vector2;
+  prevPos: Vector2;
+  readonly vel: Vector2;
+  ttl: number;
+  readonly bornAt: number;
+  confirmed: boolean;
+}
+
+export interface NetStats {
+  rttMs: number;
+  lastCorrection: number;
+  snapshotsMissed: number;
+  bytesInPerS: number;
+  bytesOutPerS: number;
+  serverTick: number;
+}
+
+export interface NetHistory {
+  readonly rtt: number[];
+  readonly age: number[];
+  readonly correction: number[];
+  readonly pending: number[];
+}
+
+/**
+ * Client side of the authoritative-server model (Lab 5).
+ *
+ *  - own ship: PREDICTED with the shared stepShipMotion(), one step per input (DT = 1/30 s).
+ *    On every snapshot: reset to the server's state, drop acked inputs, REPLAY the rest
+ *    (reconciliation), and hide the remaining jump with an exponentially decaying visual offset.
+ *  - own bullets: predicted at the moment of firing, keyed by the input seq that fired them;
+ *    the server's bullet (same spawnSeq) confirms them, its disappearance removes them.
+ *  - everything else: INTERPOLATED between the two snapshots around now − interpolationDelay.
+ *  - events (explosions, sounds, popups) are replayed at render time, so they line up with the
+ *    interpolated picture.
+ */
+export class NetGame {
+  readonly conn: Connection;
+  readonly codec: AnyCodec;
+  readonly codecName: CodecName;
+  readonly bounds: Bounds;
+  selfPlayerId: string | null;
+  selfShipId: EntityId | null = null;
+  readonly names = new Map<EntityId, string>(); // shipId -> pilot name
+
+  prediction: boolean;
+  interpolation: boolean;
+  interpDelayMs: number;
+  chaos = false;
+
+  seq = 0;
+  pending: Input[] = []; // unacknowledged inputs
+  readonly snapshots: SnapSlot[] = [];
+  latest: SnapSlot | null = null;
+  tickBase: number | null = null; // client time (ms) at which server tick 0 "happened"
+
+  me: PredictedShip | null = null;
+  smooth = Vector2.ZERO;
+  readonly predictedBullets = new Map<Seq, PredictedBullet>();
+  readonly pendingEvents: { readonly tick: number; readonly event: GameEvent }[] = [];
+
+  /** Explosions are purely visual: a local World holding only Explosion entities. */
+  readonly effects: World;
+  /** The same typed bus audio.ts and hud.ts subscribe to offline. */
+  readonly events = new Bus<GameEvents>();
+
+  readonly stats: NetStats = {
+    rttMs: 0,
+    lastCorrection: 0,
+    snapshotsMissed: 0,
+    bytesInPerS: 0,
+    bytesOutPerS: 0,
+    serverTick: 0,
+  };
+  readonly history: NetHistory = { rtt: [], age: [], correction: [], pending: [] };
+
+  constructor({
+    conn,
+    codec,
+    bounds,
+    selfPlayerId,
+    flags = {},
+  }: {
+    conn: Connection;
+    codec: CodecName;
+    bounds: Bounds;
+    selfPlayerId: string | null;
+    flags?: { prediction?: boolean; interpolation?: boolean; interpDelayMs?: number };
+  }) {
+    this.conn = conn;
+    this.codec = codecFor(codec);
+    this.codecName = codec;
+    this.bounds = bounds;
+    this.selfPlayerId = selfPlayerId;
+    this.prediction = flags.prediction ?? true;
+    this.interpolation = flags.interpolation ?? true;
+    this.interpDelayMs = flags.interpDelayMs ?? 100;
+    this.effects = new World({ width: bounds.width, height: bounds.height, seed: 1 });
+  }
+
+  get entityCount(): number {
+    return this.latest?.entities.length ?? 0;
+  }
+
+  // ---------- roster → which ship is mine ----------
+  setRoster(players: readonly RosterPlayer[]): void {
+    this.names.clear();
+    for (const p of players) {
+      if (p.shipId !== undefined) this.names.set(p.shipId, p.name);
+      if (p.id === this.selfPlayerId) this.selfShipId = p.shipId ?? null;
+    }
+  }
+
+  // ---------- one fixed client step = one input ----------
+  step(buttons: number): void {
+    const input: Input = { seq: asSeq(++this.seq), buttons };
+    this.pending.push(input);
+    if (this.pending.length > 120) this.pending.shift(); // server gone quiet; don't grow forever
+    // Each packet carries the newest input plus the previous ones → a dropped packet costs nothing.
+    this.conn.sendRaw(this.codec.encodeInputs(this.pending.slice(-INPUT_REDUNDANCY)));
+
+    const me = this.me;
+    if (this.prediction && me && !me.destroyed) {
+      me.prevPos = me.pos;
+      me.prevAngle = me.angle;
+      if (stepShipMotion(me, buttonsToControls(buttons), DT, this.bounds))
+        this.#fireLocally(me, input.seq);
+    }
+
+    for (const [seq, b] of this.predictedBullets) {
+      b.prevPos = b.pos;
+      b.pos = this.#wrap(b.pos.addScaled(b.vel, DT));
+      b.ttl -= DT;
+      if (b.ttl <= 0) this.predictedBullets.delete(seq);
+    }
+    this.effects.step(DT);
+  }
+
+  #fireLocally(me: PredictedShip, seq: Seq): void {
+    me.fireCooldown = FIRE_COOLDOWN_S;
+    const dir = Vector2.fromAngle(me.angle);
+    const nose = me.pos.add(dir.scale(me.radius + 10));
+    const fast = me.effects.has('bullets');
+    const vel = me.vel.add(dir.scale(fast ? BULLET_SPEEDS.fast : BULLET_SPEEDS.normal));
+    const angle = Math.atan2(vel.y, vel.x);
+    this.predictedBullets.set(seq, {
+      kind: 'bullet',
+      id: `p${seq}`,
+      pos: nose,
+      prevPos: nose,
+      vel,
+      angle,
+      prevAngle: angle,
+      fast,
+      alive: true,
+      ttl: BULLET_TTL,
+      bornAt: performance.now(),
+      confirmed: false,
+    });
+    this.#emitNow({ type: 'fired', x: nose.x, y: nose.y, shipId: me.id, fast });
+  }
+
+  // ---------- snapshots ----------
+  /** A binary frame from the Connection (binary codec). */
+  receiveBinary(data: ArrayBuffer): void {
+    if (this.codec.name !== 'binary') return;
+    try {
+      this.receive(binaryCodec.decodeSnapshot(new Uint8Array(data)));
+    } catch (err: unknown) {
+      console.warn('[net] bad snapshot', err instanceof Error ? err.message : err);
+    }
+  }
+
+  /** A decoded, validated snapshot (from either codec). */
+  receive(snap: Snapshot): void {
+    const now = performance.now();
+    if (this.latest && snap.tick <= this.latest.tick) return; // late/duplicate
+    if (this.latest) this.stats.snapshotsMissed += snap.tick - this.latest.tick - 1;
+
+    const slot: SnapSlot = {
+      ...snap,
+      recvAt: now,
+      byId: new Map(snap.entities.map((e) => [e.id, e])),
+    };
+    this.snapshots.push(slot);
+    if (this.snapshots.length > MAX_SNAPSHOTS) this.snapshots.shift();
+    this.latest = slot;
+    this.stats.serverTick = snap.tick;
+
+    // Server clock estimate: the earliest arrival is the least delayed one. Track the minimum,
+    // and creep upward slowly so a lasting change in latency is followed too.
+    const base = now - snap.tick * TICK_MS;
+    if (this.tickBase === null || base < this.tickBase) this.tickBase = base;
+    else this.tickBase += (base - this.tickBase) * 0.02;
+
+    for (const event of snap.events) this.pendingEvents.push({ tick: snap.tick, event });
+    this.#reconcile(slot);
+    this.#confirmBullets(slot);
+  }
+
+  #reconcile(snap: SnapSlot): void {
+    const server = this.selfShipId === null ? undefined : snap.byId.get(this.selfShipId);
+    if (server?.kind !== 'ship') return;
+    const me = (this.me ??= makeShip(server));
+
+    const before = me.pos;
+    applyServerShip(me, server);
+    this.pending = this.pending.filter((i) => i.seq > snap.ack);
+
+    if (this.prediction && !me.destroyed) {
+      // Replay every input the server hasn't processed yet, on top of its authoritative state.
+      for (const input of this.pending) {
+        if (stepShipMotion(me, buttonsToControls(input.buttons), DT, this.bounds))
+          me.fireCooldown = FIRE_COOLDOWN_S;
+      }
+    }
+
+    // How far did the truth move us? 0 = prediction was perfect.
+    let dx = before.x - me.pos.x;
+    let dy = before.y - me.pos.y;
+    dx -= Math.round(dx / this.bounds.width) * this.bounds.width; // through the arena wrap
+    dy -= Math.round(dy / this.bounds.height) * this.bounds.height;
+    const correction = Math.hypot(dx, dy);
+    this.stats.lastCorrection = correction;
+    this.history.correction.push(correction);
+
+    if (!this.prediction || correction > TELEPORT_PX || me.destroyed) {
+      this.smooth = Vector2.ZERO; // off, respawn or big desync: snap
+      me.prevPos = me.pos;
+    } else {
+      // Keep drawing where we were; the offset decays toward the corrected position.
+      const delta = new Vector2(dx, dy);
+      this.smooth = this.smooth.add(delta);
+      me.prevPos = me.prevPos.sub(delta);
+    }
+  }
+
+  #confirmBullets(snap: SnapSlot): void {
+    const mine = new Set<number>();
+    for (const e of snap.entities)
+      if (e.kind === 'bullet' && e.owner === this.selfShipId) mine.add(e.spawnSeq);
+    const now = performance.now();
+    for (const [seq, b] of this.predictedBullets) {
+      if (mine.has(seq)) b.confirmed = true;
+      else if (b.confirmed)
+        this.predictedBullets.delete(seq); // server's bullet is gone: it hit something
+      else if (now - b.bornAt > this.stats.rttMs + 400) this.predictedBullets.delete(seq); // never spawned
+    }
+  }
+
+  // ---------- render time ----------
+  /** Fractional server tick we are drawing remote entities at. */
+  renderTick(now = performance.now()): number {
+    if (this.tickBase === null) return 0;
+    return (now - this.tickBase) / TICK_MS - this.interpDelayMs / TICK_MS;
+  }
+
+  /** Remote entities at render time (or the raw latest snapshot without interpolation). */
+  #remoteEntities(now: number): EntityState[] {
+    const latest = this.latest;
+    if (!latest) return [];
+    if (!this.interpolation) return [...latest.entities];
+
+    const rt = this.renderTick(now);
+    let a: SnapSlot = this.snapshots[0] ?? latest;
+    let b: SnapSlot = latest;
+    for (let i = this.snapshots.length - 1; i > 0; i--) {
+      const prev = this.snapshots[i - 1];
+      const cur = this.snapshots[i];
+      if (prev && cur && prev.tick <= rt) {
+        a = prev;
+        b = cur;
+        break;
+      }
+    }
+    const t = b.tick === a.tick ? 1 : Math.max(0, Math.min(1, (rt - a.tick) / (b.tick - a.tick)));
+    // Entities in b: blended if they also existed in a; new ones appear at their first position;
+    // entities gone in b simply aren't drawn.
+    return b.entities.map((e) => lerpEntity(a.byId.get(e.id) ?? e, e, t, this.bounds));
+  }
+
+  /** Dispatch the events whose tick the interpolated picture has reached. */
+  flushEvents(now = performance.now()): void {
+    const rt = this.interpolation ? this.renderTick(now) : Infinity;
+    for (;;) {
+      const next = this.pendingEvents[0];
+      if (!next || next.tick > rt + 0.5) break;
+      this.pendingEvents.shift();
+      const { event } = next;
+      if (event.type === 'fired' && event.shipId === this.selfShipId && this.prediction) continue; // already played
+      this.#emitNow(event);
+    }
+  }
+
+  /** Re-announce a snapshot event on the typed bus. Exhaustive: a new event type is a compile error. */
+  #emitNow(event: GameEvent): void {
+    if (event.type === 'exploded') {
+      const ship = event.kind === 'ship';
+      const size = event.kind === 'asteroid' ? event.size : 2;
+      this.effects.spawn(
+        new Explosion({
+          x: event.x,
+          y: event.y,
+          color: ship ? '#ff7a1a' : '#c8b49a',
+          count: ship ? 60 : 10 + size * 8,
+          speed: ship ? 150 : 80 + size * 50,
+        }),
+      );
+    }
+    const { events } = this;
+    switch (event.type) {
+      case 'fired':
+        return events.emit('fired', event);
+      case 'hit':
+        return events.emit('hit', event);
+      case 'exploded':
+        return events.emit('exploded', event);
+      case 'scored':
+        return events.emit('scored', event);
+      case 'pickup':
+        return events.emit('pickup', event);
+      case 'respawned':
+        return events.emit('respawned', event);
+      default: {
+        const unreachable: never = event;
+        return unreachable;
+      }
+    }
+  }
+
+  /** What drawWorld draws: interpolated remotes + predicted self + predicted bullets + effects. */
+  renderWorld(now = performance.now(), frameDt = 0): RenderWorld {
+    this.smooth = this.smooth.scale(Math.exp(-frameDt / SMOOTH_TAU_S));
+
+    const views: Drawable[] = [];
+    for (const e of this.#remoteEntities(now)) {
+      const own = this.prediction && e.id === this.selfShipId;
+      const ownBullet =
+        this.prediction &&
+        e.kind === 'bullet' &&
+        e.owner === this.selfShipId &&
+        this.predictedBullets.has(e.spawnSeq);
+      if (!own && !ownBullet) views.push(toView(e));
+    }
+    const me = this.me;
+    if (me && this.prediction) {
+      // the predicted ship, shifted by the decaying correction offset
+      views.push({ ...me, pos: me.pos.add(this.smooth), prevPos: me.prevPos.add(this.smooth) });
+    }
+    if (this.prediction) views.push(...this.predictedBullets.values());
+
+    const effects = this.effects;
+    return {
+      width: this.bounds.width,
+      height: this.bounds.height,
+      *ofKind(kind: DrawableKind): Generator<Drawable> {
+        if (kind === 'explosion') yield* effects.ofKind('explosion');
+        else for (const v of views) if (v.kind === kind) yield v;
+      },
+    };
+  }
+
+  /** The predicted ship as a drawable/HUD-able object (null before our first snapshot). */
+  selfView(): PredictedShip | null {
+    const me = this.me;
+    if (me) me.name = this.names.get(me.id) ?? 'me';
+    return me;
+  }
+
+  sample(now: number): void {
+    const h = this.history;
+    h.rtt.push(this.stats.rttMs);
+    h.age.push(this.latest ? now - this.latest.recvAt : 0);
+    h.pending.push(this.pending.length);
+    for (const series of [h.rtt, h.age, h.correction, h.pending])
+      if (series.length > 120) series.splice(0, series.length - 120);
+  }
+
+  #wrap(p: Vector2): Vector2 {
+    let { x, y } = p;
+    if (x < 0) x += this.bounds.width;
+    else if (x >= this.bounds.width) x -= this.bounds.width;
+    if (y < 0) y += this.bounds.height;
+    else if (y >= this.bounds.height) y -= this.bounds.height;
+    return x === p.x && y === p.y ? p : new Vector2(x, y);
+  }
+}
+
+// ---------- helpers ----------
+
+function effectsOf(s: ShipState): Map<ShipEffect, number> {
+  const effects = new Map<ShipEffect, number>();
+  if (s.speed > 0) effects.set('speed', s.speed);
+  if (s.bullets > 0) effects.set('bullets', s.bullets);
+  return effects;
+}
+
+function makeShip(s: ShipState): PredictedShip {
+  const pos = new Vector2(s.x, s.y);
+  return {
+    kind: 'ship',
+    id: s.id,
+    pos,
+    prevPos: pos,
+    vel: new Vector2(s.vx, s.vy),
+    angle: s.angle,
+    prevAngle: s.angle,
+    radius: 18,
+    alive: true,
+    maxHp: 100,
+    hp: s.hp,
+    score: s.score,
+    deaths: s.deaths,
+    destroyed: s.destroyed,
+    respawnIn: s.respawnIn,
+    hitFlash: 0,
+    effects: effectsOf(s),
+    invulnerableFor: s.invulnerable,
+    fireCooldown: s.fireCooldown,
+    thrusting: s.thrusting,
+    name: 'me',
+  };
+}
+
+/** Authoritative fields from the snapshot onto our predicted ship. */
+function applyServerShip(me: PredictedShip, s: ShipState): void {
+  me.pos = new Vector2(s.x, s.y);
+  me.vel = new Vector2(s.vx, s.vy);
+  me.angle = s.angle;
+  me.hp = s.hp;
+  me.score = s.score;
+  me.deaths = s.deaths;
+  me.destroyed = s.destroyed;
+  me.respawnIn = s.respawnIn;
+  me.thrusting = s.thrusting;
+  me.hitFlash = s.hitFlash ? 0.1 : 0;
+  me.invulnerableFor = s.invulnerable;
+  me.fireCooldown = s.fireCooldown;
+  me.effects.clear();
+  for (const [k, v] of effectsOf(s)) me.effects.set(k, v);
+}
+
+function lerpAngle(a: number, b: number, t: number): number {
+  let d = b - a;
+  d -= Math.round(d / (Math.PI * 2)) * Math.PI * 2;
+  return a + d * t;
+}
+
+/** Blend two states of the same entity. `{ ...b, … }` keeps b's kind, so the union stays intact. */
+function lerpEntity(a: EntityState, b: EntityState, t: number, bounds: Bounds): EntityState {
+  if (a === b || t >= 1) return b;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  // through the wrap: don't streak across the whole arena
+  if (Math.abs(dx) > bounds.width / 2 || Math.abs(dy) > bounds.height / 2) return b;
+  return { ...b, x: a.x + dx * t, y: a.y + dy * t, angle: lerpAngle(a.angle, b.angle, t) };
+}
+
+const shapeCache = new Map<number, readonly number[]>();
+function rockShape(id: number): readonly number[] {
+  let shape = shapeCache.get(id);
+  if (!shape) {
+    let s = id * 2654435761;
+    shape = Array.from({ length: 11 }, () => {
+      s = (s * 1664525 + 1013904223) >>> 0;
+      return 0.75 + (s / 4294967296) * 0.3;
+    });
+    shapeCache.set(id, shape);
+  }
+  return shape;
+}
+
+/** Snapshot entity → what draw.ts expects. Exhaustive over the snapshot's entity kinds. */
+function toView(e: EntityState): Drawable {
+  const pos = new Vector2(e.x, e.y);
+  const base = { pos, prevPos: pos, angle: e.angle, prevAngle: e.angle, alive: true };
+  switch (e.kind) {
+    case 'ship':
+      return {
+        ...base,
+        kind: 'ship',
+        radius: 18,
+        hp: e.hp,
+        maxHp: 100,
+        destroyed: e.destroyed,
+        thrusting: e.thrusting,
+        hitFlash: e.hitFlash ? 0.1 : 0,
+        invulnerableFor: e.invulnerable,
+        effects: effectsOf(e),
+      };
+    case 'bullet': {
+      const angle = Math.atan2(e.vy, e.vx);
+      return { ...base, kind: 'bullet', fast: e.fast, angle, prevAngle: angle };
+    }
+    case 'asteroid':
+      return {
+        ...base,
+        kind: 'asteroid',
+        id: e.id,
+        radius: ASTEROID_RADIUS[e.size],
+        homing: e.seeker ? true : null,
+        hitFlash: e.hitFlash ? 0.1 : 0,
+        shape: rockShape(e.id),
+      };
+    case 'pickup':
+      return {
+        ...base,
+        kind: 'pickup',
+        radius: 12,
+        pickup: { effect: e.effect },
+        lifetime: 15,
+        age: 15 - e.lifeLeft,
+      };
+    default: {
+      const unreachable: never = e;
+      return unreachable;
+    }
+  }
+}

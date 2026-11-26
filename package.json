@@ -1,6 +1,6 @@
 {
   "name": "flyordie",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -9,23 +9,28 @@
     "server"
   ],
   "engines": {
-    "node": ">=22.9"
+    "node": ">=22.18"
   },
   "scripts": {
-    "dev": "node scripts/dev.mjs",
+    "dev": "node scripts/dev.ts",
     "dev:client": "npm run dev -w client",
     "dev:server": "npm run dev -w server",
     "build": "npm run build -w client",
     "start": "npm run build && npm run start -w server",
     "test": "npm test --workspaces --if-present",
     "lint": "eslint .",
-    "format": "prettier --write client/src client/tools client/index.html client/vite.config.js server scripts"
+    "format": "prettier --write shared client/src client/tools client/index.html client/duel.html client/vite.config.ts server scripts",
+    "typecheck": "tsc -p tsconfig.json && npm run typecheck --workspaces"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@types/node": "^24.19.4",
+    "@types/ws": "^8.18.2",
     "eslint": "^10.15.0",
     "eslint-config-prettier": "^10.1.8",
     "globals": "^17.14.0",
-    "prettier": "^3.10.1"
+    "prettier": "^3.10.1",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.74.0"
   }
 }

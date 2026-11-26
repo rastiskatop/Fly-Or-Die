@@ -1,0 +1,225 @@
+// Integration: starts the real server (child process, random port, temp LOG_DIR) and talks to it
+// over HTTP and WebSocket like a browser would.
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import { fork } from 'node:child_process';
+import { mkdtemp, readdir } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { once } from 'node:events';
+import WebSocket, { type RawData } from 'ws';
+import type { ChildProcess } from 'node:child_process';
+import { z } from 'zod';
+import { binaryCodec } from '@flyordie/shared/net/codec.ts';
+import { asSeq } from '@flyordie/shared/ids.ts';
+import type { Snapshot } from '@flyordie/shared/net/protocol.ts';
+import {
+  HealthSchema,
+  RoomsResponseSchema,
+  ServerMessageSchema,
+  type ServerMessage,
+} from '@flyordie/shared/net/messages.ts';
+
+let child: ChildProcess;
+let base = '';
+let wsUrl = '';
+let logDir = '';
+
+const Listening = z.object({ type: z.literal('listening'), port: z.number() });
+
+before(async () => {
+  logDir = await mkdtemp(join(tmpdir(), 'flyordie-logs-'));
+  child = fork(join(import.meta.dirname, '..', 'src', 'index.ts'), [], {
+    env: {
+      ...process.env,
+      PORT: '0',
+      LOG_DIR: logDir,
+      JOIN_TIMEOUT_MS: '300',
+      RATE_LIMIT_PER_SEC: '5',
+      RATE_LIMIT_BURST: '5',
+      MAX_PAYLOAD_BYTES: '1024',
+      MAX_PLAYERS_PER_ROOM: '2',
+    },
+    stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
+  });
+  const [msg] = await once(child, 'message');
+  const { port } = Listening.parse(msg);
+  base = `http://127.0.0.1:${port}`;
+  wsUrl = `ws://127.0.0.1:${port}/ws`;
+});
+
+after(async () => {
+  child.send({ type: 'shutdown' }); // graceful: closes sockets, flushes logs, exits 0
+  const [code] = await once(child, 'exit');
+  assert.equal(code, 0);
+});
+
+/** GET + JSON, validated: the server's own responses must match the shared schemas too. */
+async function getJson<T>(url: string, schema: z.ZodType<T>): Promise<T> {
+  return schema.parse(await (await fetch(url)).json());
+}
+
+type Msg = ServerMessage;
+type MsgOf<K extends Msg['type']> = Extract<Msg, { type: K }>;
+
+/** Opens a socket; every server message is parsed with ServerMessageSchema (so malformed output fails the test). */
+async function client() {
+  const ws = new WebSocket(wsUrl);
+  const messages: Msg[] = [];
+  ws.on('message', (d: RawData, isBinary: boolean) => {
+    if (!isBinary) messages.push(ServerMessageSchema.parse(JSON.parse(String(d))));
+  });
+  const closed = new Promise<number>((resolve) => ws.on('close', (code: number) => resolve(code)));
+  await once(ws, 'open');
+  const send = (m: Record<string, unknown>) => ws.send(JSON.stringify({ v: 1, ...m }));
+  /** Waits for the first message of type K that satisfies `pred` — typed as that message. */
+  const waitFor = async <K extends Msg['type']>(
+    type: K,
+    pred: (m: MsgOf<K>) => boolean = () => true,
+    ms = 2000,
+  ): Promise<MsgOf<K>> => {
+    const end = Date.now() + ms;
+    while (Date.now() < end) {
+      for (const m of messages) if (isType(m, type) && pred(m)) return m;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    throw new Error(`timed out waiting for ${type}; got ${JSON.stringify(messages)}`);
+  };
+  return { ws, messages, send, waitFor, closed };
+}
+
+function isType<K extends Msg['type']>(m: Msg, type: K): m is MsgOf<K> {
+  return m.type === type;
+}
+
+test('GET /health and /api/rooms', async () => {
+  const health = await getJson(`${base}/health`, HealthSchema);
+  assert.equal(health.status, 'ok');
+  const { rooms } = await getJson(`${base}/api/rooms`, RoomsResponseSchema);
+  assert.ok(rooms.some((r) => r.id === 'eu-1'));
+});
+
+test('POST /api/rooms validates and caps the body', async () => {
+  const post = (body: unknown) =>
+    fetch(`${base}/api/rooms`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  assert.equal((await post({ name: 'Test', arena: 'calm' })).status, 201);
+  assert.equal((await post({ name: 'Test', arena: 'moon' })).status, 400);
+  assert.equal((await post({ name: 'x'.repeat(5000) })).status, 413);
+});
+
+test('two clients join one room, see each other, chat', async () => {
+  const a = await client();
+  const b = await client();
+  a.send({ type: 'join', room: 'eu-1', name: 'Alice' });
+  await a.waitFor('welcome');
+  b.send({ type: 'join', room: 'eu-1', name: 'Bob' });
+  await b.waitFor('welcome');
+
+  const roster = await a.waitFor('roster', (m) => m.players.length === 2);
+  assert.deepEqual(roster.players.map((p) => p.name).sort(), ['Alice', 'Bob']);
+  assert.ok(
+    roster.players.every((p) => typeof p.shipId === 'number'),
+    'every player has a ship',
+  );
+
+  b.send({ type: 'chat', text: 'hello Alice' });
+  const chat = await a.waitFor('chat');
+  assert.equal(chat.from.name, 'Bob');
+  assert.equal(chat.text, 'hello Alice');
+
+  // room cap is 2 for this test server
+  const c = await client();
+  c.send({ type: 'join', room: 'eu-1', name: 'Carol' });
+  assert.equal(await c.closed, 4004);
+
+  b.ws.close(1000);
+  await a.waitFor('roster', (m) => m.players.length === 1);
+  a.ws.close(1000);
+  await a.closed;
+});
+
+test('protocol violations close the socket with a code', async () => {
+  const bad = await client();
+  bad.ws.send('not json');
+  assert.equal(await bad.closed, 4000);
+
+  const unknown = await client();
+  unknown.send({ type: 'join', room: 'eu-2', name: 'X' });
+  await unknown.waitFor('welcome');
+  unknown.send({ type: 'teleport', x: 1 });
+  assert.equal(await unknown.closed, 4001);
+
+  const silent = await client(); // never sends join
+  assert.equal(await silent.closed, 4003);
+
+  const big = await client();
+  big.ws.send('x'.repeat(4096)); // over MAX_PAYLOAD_BYTES=1024
+  assert.equal(await big.closed, 1009);
+});
+
+test('rate limit: a flood closes the socket with 1008', async () => {
+  const spam = await client();
+  spam.send({ type: 'join', room: 'eu-2', name: 'Spam' });
+  await spam.waitFor('welcome');
+  for (let i = 0; i < 20; i++) spam.send({ type: 'chat', text: `spam ${i}` });
+  assert.equal(await spam.closed, 1008);
+});
+
+test('binary netcode: inputs up, snapshots down with this client ack', async () => {
+  const ws = new WebSocket(wsUrl);
+  const snaps: Snapshot[] = [];
+  let tickRate = 0;
+  ws.on('message', (data: RawData, isBinary: boolean) => {
+    if (isBinary)
+      snaps.push(
+        binaryCodec.decodeSnapshot(Buffer.isBuffer(data) ? data : Buffer.from(String(data))),
+      );
+    else {
+      const msg = ServerMessageSchema.parse(JSON.parse(String(data)));
+      if (msg.type === 'welcome') tickRate = msg.tickRate;
+    }
+  });
+  await once(ws, 'open');
+  ws.send(JSON.stringify({ v: 1, type: 'join', room: 'us-1', name: 'Bin', codec: 'binary' }));
+  for (let seq = 1; seq <= 10; seq++) {
+    ws.send(binaryCodec.encodeInputs([{ seq: asSeq(seq), buttons: 4 }])); // thrust
+    await new Promise((r) => setTimeout(r, 34));
+  }
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(tickRate, 30);
+  assert.ok(snaps.length >= 10, `got ${snaps.length} snapshots`);
+  const last = snaps.at(-1);
+  assert.equal(last?.ack, 10); // every input applied exactly once, in order
+  assert.ok(snaps.every((s, i) => i === 0 || s.tick > (snaps[i - 1]?.tick ?? -1)));
+  assert.ok(last?.entities.some((e) => e.kind === 'ship'));
+  ws.send(Buffer.from([1, 1, 0])); // malformed binary inputs
+  const [code] = await once(ws, 'close');
+  assert.equal(code, 4000);
+});
+
+const ReplaysSchema = z.object({
+  replays: z.array(z.object({ id: z.string(), bytes: z.number(), modified: z.string() })),
+});
+const LogLine = z.object({ type: z.string() });
+
+test('a finished match is in the log directory and streams back from /api/replays', async () => {
+  const files = (await readdir(logDir)).filter((f) => f.startsWith('eu-1-'));
+  assert.ok(files.length >= 1, 'eu-1 match log exists');
+  const { replays } = await getJson(`${base}/api/replays`, ReplaysSchema);
+  const replay = replays.find((r) => r.id.startsWith('eu-1-'));
+  assert.ok(replay);
+  const res = await fetch(`${base}/api/replays/${replay.id}`);
+  assert.equal(res.headers.get('content-type'), 'application/x-ndjson');
+  const types = (await res.text())
+    .trim()
+    .split('\n')
+    .map((l) => LogLine.parse(JSON.parse(l)).type);
+  assert.equal(types[0], 'match_start');
+  assert.ok(types.includes('chat'));
+  assert.equal(types.at(-1), 'match_end');
+  assert.equal((await fetch(`${base}/api/replays/..%2f..%2fpackage`)).status, 400);
+});

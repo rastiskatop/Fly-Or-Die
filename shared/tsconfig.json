@@ -1,0 +1,7 @@
+{
+  // The shared simulation runs in BOTH runtimes: no DOM lib and no Node types here,
+  // so using document, Buffer or process in shared/src is a compile error.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": { "lib": ["ES2023"], "types": [] },
+  "include": ["src"]
+}
