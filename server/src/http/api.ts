@@ -22,6 +22,10 @@ export interface ApiContext {
   readonly setBots: (roomId: string, count: number) => number | null;
   readonly stats: { connections: number; dropped: number; bytesIn: number; bytesOut: number };
   readonly netStats: () => Readonly<Record<string, unknown>>;
+  /** Lab 8: readiness (can it take players now?) and Prometheus metrics. */
+  readonly ready: () => boolean;
+  readonly metricsText: () => Promise<string>;
+  readonly metricsContentType: string;
 }
 
 type Handler = (
@@ -43,6 +47,8 @@ export function createApiHandler(ctx: ApiContext): ApiHandler {
 
   const routes: Route[] = [
     ['GET', /^\/health$/, health],
+    ['GET', /^\/ready$/, ready],
+    ['GET', /^\/metrics$/, metrics],
     ['GET', /^\/api\/rooms$/, listRooms],
     ['POST', /^\/api\/rooms$/, createRoom],
     ['POST', /^\/api\/rooms\/([a-z0-9-]{1,32})\/bots$/, setBots],
@@ -59,7 +65,8 @@ export function createApiHandler(ctx: ApiContext): ApiHandler {
   }
 
   return async function handleApi(req, res, url) {
-    const isApi = url.pathname === '/health' || url.pathname.startsWith('/api/');
+    const isApi =
+      ['/health', '/ready', '/metrics'].includes(url.pathname) || url.pathname.startsWith('/api/');
     if (!isApi) return false;
 
     if (req.method === 'OPTIONS') {
@@ -94,7 +101,8 @@ export function createApiHandler(ctx: ApiContext): ApiHandler {
     sendJson(res, 200, {
       status: 'ok',
       service: 'flyordie',
-      version: 1,
+      version: config.version, // the git commit actually running (Lab 8)
+      protocol: 1,
       uptimeS: Math.round(process.uptime()),
       rooms: rooms.size,
       players: rooms.playerCount,
@@ -102,6 +110,19 @@ export function createApiHandler(ctx: ApiContext): ApiHandler {
       rssMB: +(mem.rss / 2 ** 20).toFixed(1),
       heapUsedMB: +(mem.heapUsed / 2 ** 20).toFixed(1),
     });
+  }
+
+  /** Readiness (Lab 8): 200 = send me players; 503 = don't (starting up or shutting down). */
+  function ready(_req: IncomingMessage, res: ServerResponse): void {
+    const ok = ctx.ready();
+    sendJson(res, ok ? 200 : 503, { ready: ok, version: config.version });
+  }
+
+  /** Prometheus text format: counters, gauges, Node's default process metrics. */
+  async function metrics(_req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const body = await ctx.metricsText();
+    res.writeHead(200, { 'Content-Type': ctx.metricsContentType, 'Cache-Control': 'no-store' });
+    res.end(body);
   }
 
   /** Lab 5: tick duration/jitter per match + bytes/s per connection. */

@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call: # the release pipeline runs the same gate before deploying
 
 jobs:
   check:
@@ -31,3 +32,53 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  # Lab 8: the production image — built, sized, started, health-checked and stopped gracefully.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: flyordie:ci
+          build-args: GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Size (< 200 MB), run, health, graceful stop
+        run: |
+          set -euo pipefail
+          size=$(docker image inspect flyordie:ci --format '{{.Size}}')
+          mb=$((size / 1024 / 1024))
+          echo "image size: ${mb} MB"
+          test "$mb" -lt 200
+          docker run -d --name app -p 8787:8787 flyordie:ci
+          for i in $(seq 1 30); do curl -fsS localhost:8787/ready && break; sleep 1; done
+          health=$(curl -fsS localhost:8787/health)
+          echo "$health"
+          echo "$health" | grep -q "\"version\":\"${GITHUB_SHA::7}\""
+          test "$(docker inspect app --format '{{.Config.User}}')" = "node"
+          # A foreign page may not open a WebSocket: the handshake must be refused (403).
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+            -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+            -H 'Origin: https://evil.example' localhost:8787/ws)
+          echo "foreign-origin handshake: $code"
+          test "$code" = "403"
+          curl -fsS localhost:8787/metrics | grep -E '^flyordie_(players|rooms|ws_rejections_total)' || true
+          start=$(date +%s%N)
+          docker stop app   # SIGTERM → graceful shutdown; SIGKILL only after 10 s
+          ms=$(( ($(date +%s%N) - start) / 1000000 ))
+          exit_code=$(docker inspect app --format '{{.State.ExitCode}}')
+          echo "docker stop took ${ms} ms, exit code ${exit_code}"
+          docker logs app | tail -5
+          test "$exit_code" = "0"
+          test "$ms" -lt 10000
+          {
+            echo "### Docker image"
+            echo "| size | docker stop | exit code |"
+            echo "|---|---|---|"
+            echo "| ${mb} MB | ${ms} ms | ${exit_code} |"
+          } >> "$GITHUB_STEP_SUMMARY"

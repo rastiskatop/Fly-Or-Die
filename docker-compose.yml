@@ -1,0 +1,21 @@
+# Production-like local run: `docker compose up --build`, then http://localhost:8787
+services:
+  flyordie:
+    build:
+      context: .
+      args:
+        GIT_SHA: ${GIT_SHA:-local}
+    image: flyordie:local
+    ports:
+      - '8787:8787'
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      # Behind a reverse proxy you would set TRUST_PROXY=true and ALLOWED_ORIGINS=https://your.host
+      MAX_CONNECTIONS_PER_IP: '16'
+    restart: unless-stopped
+    # Docker's grace period before SIGKILL; our graceful shutdown takes < 2 s.
+    stop_grace_period: 15s
+    read_only: true
+    tmpfs:
+      - /tmp

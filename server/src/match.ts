@@ -197,6 +197,11 @@ export class Match extends EventEmitter<MatchEvents> {
     if (this.#timer !== null) this.#schedule();
   }
 
+  /** p99 tick duration over the last 60 s (ms) — the /metrics gauge. */
+  tickP99Ms(): number {
+    return summarize(this.tickTimes.values()).p99;
+  }
+
   statsJSON(): Record<string, number | string> {
     const round = (n: number) => Math.round(n * 100) / 100;
     const t = summarize(this.tickTimes.values());

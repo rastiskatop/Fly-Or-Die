@@ -9,7 +9,9 @@ import { createStaticHandler } from './http/static.ts';
 import { createApiHandler } from './http/api.ts';
 import { sendError } from './http/respond.ts';
 import { attachWebSockets } from './ws.ts';
-import { log } from './logger.ts';
+import { log, configureLogger } from './logger.ts';
+import { createMetrics } from './metrics.ts';
+import { createGate } from './gate.ts';
 import { Match } from './match.ts';
 import { BotManager } from './bots.ts';
 import { performance } from 'node:perf_hooks'; // Node's (with eventLoopUtilization), not the DOM type
@@ -19,6 +21,8 @@ import { ArenaSchema, type ArenaRules } from '@flyordie/shared/sim/arena.ts';
 const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 const config = loadConfig();
+configureLogger({ level: config.logLevel, version: config.version });
+const metrics = createMetrics(config.version);
 await mkdir(config.logDir, { recursive: true }); // top-level await: ESM only
 
 const stats = { connections: 0, dropped: 0, bytesIn: 0, bytesOut: 0 };
@@ -97,6 +101,8 @@ rooms.on('roomCreated', (room) => {
   });
 });
 
+let shuttingDown = false;
+
 // ---------- HTTP ----------
 const serveStatic = createStaticHandler(config.staticDir);
 // ---------- bots (Lab 7): AI pilots that use the same input path as players ----------
@@ -109,6 +115,11 @@ const handleApi = createApiHandler({
   config,
   rooms,
   stats,
+  // Readiness: listening and not shutting down. A platform stops routing new players here when it
+  // turns false — exactly what we want during a deploy's graceful shutdown.
+  ready: () => listening && !shuttingDown,
+  metricsText: () => metrics.registry.metrics(),
+  metricsContentType: metrics.registry.contentType,
   setBots: (roomId, count) => {
     const room = rooms.get(roomId);
     if (!room) return null;
@@ -149,18 +160,44 @@ server.on('clientError', (err, socket) => socket.end('HTTP/1.1 400 Bad Request\r
 
 // ---------- WebSocket on /ws (same port: HTTP Upgrade) ----------
 const wss = new WebSocketServer({ noServer: true, maxPayload: config.maxPayloadBytes });
-const sockets = attachWebSockets(wss, { rooms, matches, config, stats });
+const sockets = attachWebSockets(wss, { rooms, matches, config, stats, metrics });
+metrics.attach({
+  players: () => rooms.playerCount,
+  rooms: () => rooms.size,
+  connections: () => wss.clients.size,
+  tickP99s: () => [...matches.values()].map((m) => ({ room: m.roomId, p99: m.tickP99Ms() })),
+});
+
+// Lab 8: the gate runs on the HTTP upgrade, before a WebSocket exists — origin + per-IP cap.
+const gate = createGate(config);
 server.on('upgrade', (req, socket, head) => {
   if (new URL(req.url ?? '/', 'http://localhost').pathname !== '/ws') {
     socket.end('HTTP/1.1 404 Not Found\r\n\r\n');
     return;
   }
-  wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+  if (shuttingDown) {
+    socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\n\r\n');
+    return;
+  }
+  const admitted = gate.admit(req);
+  if (!admitted.ok) {
+    metrics.rejected(admitted.reason);
+    log.warn('ws refused at handshake', { reason: admitted.reason, origin: req.headers.origin });
+    const text = admitted.status === 403 ? 'Forbidden' : 'Too Many Requests';
+    socket.end(`HTTP/1.1 ${admitted.status} ${text}\r\nConnection: close\r\n\r\n`);
+    return;
+  }
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    ws.once('close', () => gate.release(admitted.ip));
+    wss.emit('connection', ws, req);
+  });
 });
 
 seedDefaultRooms(rooms); // after the listeners above, so the default rooms are wired too
 
+let listening = false;
 server.listen(config.port, config.host, () => {
+  listening = true;
   const address = server.address();
   const port = typeof address === 'object' && address ? address.port : config.port;
   log.info('server listening', {
@@ -168,6 +205,8 @@ server.listen(config.port, config.host, () => {
     static: config.staticDir,
     logs: config.logDir,
     debugRoutes: config.debugRoutes,
+    production: config.production,
+    allowedOrigins: config.allowedOrigins,
   });
   const open = `http://localhost:${port}`;
   log.info(`▶ open the game: ${open}  (stop with Ctrl+C)`);
@@ -175,7 +214,6 @@ server.listen(config.port, config.host, () => {
 });
 
 // ---------- graceful shutdown ----------
-let shuttingDown = false;
 async function shutdown(signal: string, exitCode = 0): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
@@ -207,10 +245,10 @@ process.on('message', (m: unknown) => {
 // Last resort. These are BUGS — the process state is unknown, so we don't continue as if nothing
 // happened: log it, flush the match logs, exit 1, and let the supervisor (Docker, Lab 8) restart us.
 process.on('uncaughtException', (err) => {
-  log.error('FATAL uncaughtException', { err: err.message });
+  log.fatal('uncaughtException', err); // with the stack
   void shutdown('uncaughtException', 1);
 });
 process.on('unhandledRejection', (reason: unknown) => {
-  log.error('FATAL unhandledRejection', { err: errorMessage(reason) });
+  log.fatal('unhandledRejection', reason);
   void shutdown('unhandledRejection', 1);
 });

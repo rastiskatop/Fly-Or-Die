@@ -1,0 +1,55 @@
+{
+  "flood": {
+    "baseline": {
+      "tickP99Ms": 3.22,
+      "ticks": 390,
+      "elu": 0.041,
+      "junkFrames": 0,
+      "junkPerSec": 0,
+      "junkSockets": 0
+    },
+    "flooded": {
+      "tickP99Ms": 2.51,
+      "ticks": 393,
+      "elu": 0.633,
+      "junkFrames": 144640,
+      "junkPerSec": 11680,
+      "junkSockets": 2260
+    },
+    "rejectionsDuringFlood": {
+      "bad_message": 2260
+    }
+  },
+  "clientKill": {
+    "rosterUpdatedAfterMs": 15,
+    "survivorRoster": 1,
+    "matchStillRunning": true
+  },
+  "serverKill": {
+    "killedAtMs": 525,
+    "restartedAtMs": 4441,
+    "rejoinedAfterRestartMs": 1994,
+    "backoff": [
+      {
+        "attempt": 1,
+        "delayMs": 449,
+        "code": 1006
+      },
+      {
+        "attempt": 2,
+        "delayMs": 927,
+        "code": 1006
+      },
+      {
+        "attempt": 3,
+        "delayMs": 1313,
+        "code": 1006
+      },
+      {
+        "attempt": 4,
+        "delayMs": 3158,
+        "code": 1006
+      }
+    ]
+  }
+}

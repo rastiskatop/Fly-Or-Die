@@ -18,7 +18,8 @@ const bool = (def: boolean) =>
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: int(8787, 0, 65535),
-  HOST: z.string().min(1).default('127.0.0.1'),
+  // unset: 0.0.0.0 in production (reachable from outside the container), 127.0.0.1 on a laptop
+  HOST: z.string().min(1).optional(),
   STATIC_DIR: z.string().default('../client/dist'),
   LOG_DIR: z.string().default('logs'),
   ARENA_DIR: z.string().default('../client/public/assets/arenas'),
@@ -33,6 +34,27 @@ const EnvSchema = z.object({
   SLOW_CLIENT_BYTES: int(256 * 1024, 1024, 1 << 30),
   SHUTDOWN_TIMEOUT_MS: int(5000, 100, 600_000),
   DEBUG_ROUTES: bool(false).optional(),
+  // ---- Lab 8: production ----
+  LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal', 'silent']).default('info'),
+  // Browser origins allowed to open a WebSocket (comma-separated). Empty: same origin only
+  // (+ any localhost origin outside production, for Vite/Live Server).
+  ALLOWED_ORIGINS: z
+    .string()
+    .default('')
+    .transform((v) =>
+      v
+        .split(',')
+        .map((o) => o.trim())
+        .filter(Boolean),
+    )
+    .pipe(z.array(z.url().transform((u) => new URL(u).origin))),
+  MAX_CONNECTIONS_PER_IP: int(16, 1, 100_000),
+  // Behind a platform proxy (Render, Fly…) the socket's address is the PROXY: take the client IP
+  // from the last X-Forwarded-For entry (the one the trusted proxy appended).
+  TRUST_PROXY: bool(false).optional(),
+  // The build's git commit: GIT_SHA (Docker build arg) or Render's RENDER_GIT_COMMIT.
+  GIT_SHA: z.string().optional(),
+  RENDER_GIT_COMMIT: z.string().optional(),
 });
 
 /** Empty strings in .env mean "not set". */
@@ -55,7 +77,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   return Object.freeze({
     production,
     port: e.PORT,
-    host: e.HOST,
+    host: e.HOST ?? (production ? '0.0.0.0' : '127.0.0.1'),
     staticDir: resolve(here, '..', e.STATIC_DIR),
     logDir: resolve(here, '..', e.LOG_DIR),
     arenaDir: resolve(here, '..', e.ARENA_DIR),
@@ -71,6 +93,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     shutdownTimeoutMs: e.SHUTDOWN_TIMEOUT_MS,
     // /api/debug/* (blocking demo, crash demo, naive replay) — never in production by default
     debugRoutes: e.DEBUG_ROUTES ?? !production,
+    logLevel: e.LOG_LEVEL,
+    allowedOrigins: e.ALLOWED_ORIGINS,
+    maxConnectionsPerIp: e.MAX_CONNECTIONS_PER_IP,
+    trustProxy: e.TRUST_PROXY ?? false,
+    version: (e.GIT_SHA ?? e.RENDER_GIT_COMMIT ?? 'dev').slice(0, 7),
   });
 }
 

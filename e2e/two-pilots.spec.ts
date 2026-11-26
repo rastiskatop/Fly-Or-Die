@@ -16,7 +16,9 @@ declare global {
 const ROOM = 'eu-1';
 
 async function join(page: Page, name: string): Promise<number> {
-  await page.goto(`/?join=${ROOM}&name=${name}`);
+  // 'domcontentloaded', not 'load': `load` also waits for the Google Fonts stylesheet — an external
+  // CDN the game logic doesn't need; on a slow network it ate the whole test timeout.
+  await page.goto(`/?join=${ROOM}&name=${name}`, { waitUntil: 'domcontentloaded' });
   await expect(page.locator('#chat')).toBeVisible({ timeout: 15_000 }); // the match screen
   await expect
     .poll(() => page.evaluate(() => window.net?.selfShipId ?? null), { timeout: 10_000 })

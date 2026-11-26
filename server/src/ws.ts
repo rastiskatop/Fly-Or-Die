@@ -4,6 +4,8 @@ import { WebSocket, type RawData, type WebSocketServer } from 'ws';
 import { parseFrame, serverMessage, CLOSE } from './protocol.ts';
 import { TokenBucket } from './rate-limit.ts';
 import { startHeartbeat } from './heartbeat.ts';
+import { clientIp } from './gate.ts';
+import type { Metrics } from './metrics.ts';
 import { log } from './logger.ts';
 import { TICK_RATE } from '@flyordie/shared/net/protocol.ts';
 import { binaryCodec, jsonCodec } from '@flyordie/shared/net/codec.ts';
@@ -74,13 +76,19 @@ export function attachWebSockets(
     matches,
     config,
     stats,
+    metrics,
   }: {
     rooms: RoomManager;
     matches: ReadonlyMap<string, Match>;
     config: ServerConfig;
     stats: ServerStats;
+    metrics: Metrics;
   },
 ) {
+  /** 4004 → "join_refused": readable labels for the rejection metric. */
+  const reasonOf = new Map<number, string>(
+    Object.entries(CLOSE).map(([name, code]) => [code, name.toLowerCase()]),
+  );
   const states = new WeakMap<WebSocket, ConnState>();
   const socketsByRoom = new Map<string, Set<WebSocket>>();
 
@@ -116,7 +124,12 @@ export function attachWebSockets(
     if (!state || socket.readyState !== WebSocket.OPEN) return false;
     const queued = socket.bufferedAmount;
     if (queued > config.slowClientBytes * 4) {
-      log.warn('slow client terminated', { id: state.id, buffered: queued });
+      log.warn('slow client terminated', {
+        playerId: state.id,
+        roomId: state.roomId,
+        buffered: queued,
+      });
+      metrics.rejected('slow_client');
       socket.close(CLOSE.SLOW_CLIENT, 'too slow');
       setTimeout(() => socket.terminate(), 1000).unref();
       return false;
@@ -133,6 +146,7 @@ export function attachWebSockets(
       socket.send(data);
       state.bytesOut += bytes;
       stats.bytesOut += bytes;
+      metrics.messageOut(bytes);
     };
     const delay = netDelay(state, 'outAt');
     if (delay > 0) setTimeout(deliver, delay);
@@ -208,7 +222,7 @@ export function attachWebSockets(
   wss.on('connection', (socket: WebSocket, req: IncomingMessage) => {
     const state: ConnState = {
       id: randomUUID().slice(0, 8),
-      ip: req.socket.remoteAddress ?? '?',
+      ip: clientIp(req, config.trustProxy),
       player: null,
       roomId: null,
       codec: 'json',
@@ -226,13 +240,17 @@ export function attachWebSockets(
     };
     states.set(socket, state);
     stats.connections++;
-    log.info('ws connected', { id: state.id, ip: state.ip });
+    log.info('ws connected', { playerId: state.id, ip: state.ip });
 
     // ALWAYS: an 'error' without a listener would throw and take the whole server down.
-    socket.on('error', (err) => log.warn('ws error', { id: state.id, err: err.message }));
+    socket.on('error', (err) => {
+      log.warn('ws error', { playerId: state.id, roomId: state.roomId, err: err.message });
+      metrics.rejected('ws_error'); // e.g. max payload exceeded: ws closes with 1009
+    });
 
     const reject = (code: CloseCode, message: string) => {
-      log.warn('ws rejected', { id: state.id, code, reason: message });
+      log.warn('ws rejected', { playerId: state.id, roomId: state.roomId, code, reason: message });
+      metrics.rejected(reasonOf.get(code) ?? String(code));
       if (socket.readyState === WebSocket.OPEN)
         socket.send(serverMessage({ type: 'error', code, message }));
       socket.close(code, message.slice(0, 120)); // close reason is limited to 123 bytes
@@ -251,6 +269,7 @@ export function attachWebSockets(
       const parsed = parseFrame(data, isBinary);
       if (!parsed.ok) return reject(parsed.error.code, parsed.error.reason);
       const msg = parsed.value;
+      metrics.messageIn(msg.type, data.length);
       const bucket = msg.type === 'inputs' ? state.inputBucket : state.bucket;
       if (!bucket.take()) return reject(CLOSE.POLICY, 'rate limit exceeded');
 
@@ -271,9 +290,9 @@ export function attachWebSockets(
         );
         room.join(state.player); // → match spawns our ship → roster (with shipId) to everyone
         log.info('player joined', {
-          id: state.id,
+          playerId: state.id,
+          roomId: room.id,
           name: msg.name,
-          room: room.id,
           codec: state.codec,
         });
         return;
@@ -295,7 +314,7 @@ export function attachWebSockets(
           break;
         case 'netsim':
           state.netsim = { lagMs: msg.lagMs, jitterMs: msg.jitterMs, dropPct: msg.dropPct };
-          log.info('netsim', { id: state.id, ...state.netsim });
+          log.info('netsim', { playerId: state.id, roomId: state.roomId, ...state.netsim });
           break;
         case 'chat':
           room?.chat(state.id, msg.text);
@@ -333,7 +352,12 @@ export function attachWebSockets(
           .get(state.roomId)
           ?.leave(state.id, code === CLOSE.NORMAL ? 'left' : `disconnected ${code}`);
       }
-      log.info('ws closed', { id: state.id, code, dropped: state.dropped });
+      log.info('ws closed', {
+        playerId: state.id,
+        roomId: state.roomId,
+        code,
+        dropped: state.dropped,
+      });
     });
   });
 
@@ -343,8 +367,10 @@ export function attachWebSockets(
     intervalMs: config.heartbeatMs,
     sockets: () => wss.clients,
     stateOf: (socket) => states.get(socket),
-    onDead: (socket) =>
-      log.warn('heartbeat: terminating dead socket', { id: states.get(socket)?.id }),
+    onDead: (socket) => {
+      log.warn('heartbeat: terminating dead socket', { playerId: states.get(socket)?.id });
+      metrics.rejected('heartbeat');
+    },
   });
 
   return {
@@ -376,7 +402,18 @@ export function attachWebSockets(
         (socket) =>
           new Promise<void>((resolve) => {
             socket.once('close', () => resolve());
-            socket.close(CLOSE.GOING_AWAY, 'server shutting down');
+            // Say it in words first (shown in the chat), then the 1001 "going away" close frame:
+            // the client returns to the lobby with this message instead of a mystery disconnect.
+            sendMessage(
+              socket,
+              {
+                type: 'system',
+                text: 'Server is restarting — back in a few seconds',
+                t: Date.now(),
+              },
+              { critical: true },
+            );
+            socket.close(CLOSE.GOING_AWAY, 'server restarting');
           }),
       );
       return Promise.all(closed);

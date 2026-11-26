@@ -169,8 +169,8 @@ export function showLobby(
   lobby.on(
     'rooms',
     ({ rooms }) => {
-      status.classList.remove('busy');
-      errorBox.hidden = true;
+      status.classList.remove('busy', 'down');
+      // errorBox is left alone: it may say why the last match ended (Lab 8) — that must stay.
       renderRooms(rooms);
       updateStatus(
         `updated ${new Date(lobby.lastUpdated ?? Date.now()).toLocaleTimeString()} · auto-refresh every ${lobby.intervalMs / 1000}s`,
@@ -181,9 +181,11 @@ export function showLobby(
   lobby.on(
     'error',
     ({ message: why }) => {
+      // A refresh problem goes in the status line, not the error box: when the server restarts
+      // mid-match, the box says WHY the match ended and must not be overwritten by "network error".
       status.classList.remove('busy');
-      errorBox.hidden = false;
-      errorBox.textContent = `Could not load rooms: ${why}. Retrying automatically…`;
+      status.classList.add('down');
+      updateStatus(`Can't reach the server (${why}) — retrying automatically…`);
     },
     { signal },
   );

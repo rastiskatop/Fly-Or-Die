@@ -41,6 +41,9 @@ before(async () => {
       RATE_LIMIT_BURST: '5',
       MAX_PAYLOAD_BYTES: '1024',
       MAX_PLAYERS_PER_ROOM: '2',
+      MAX_CONNECTIONS_PER_IP: '8',
+      NODE_ENV: 'production', // production rules: same-origin only, no localhost exception
+      DEBUG_ROUTES: 'true',
     },
     stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
     execArgv: [], // a plain `node src/index.ts`: don't inherit the test runner's flags
@@ -240,6 +243,56 @@ test('POST /api/rooms/:id/bots: bots take slots, play (their inputs are acked), 
     undefined,
     'empty room → match stopped',
   );
+});
+
+test('/ready and /metrics (Lab 8)', async () => {
+  const ready = await fetch(`${base}/ready`);
+  assert.equal(ready.status, 200);
+  const metrics = await (await fetch(`${base}/metrics`)).text();
+  for (const name of [
+    'flyordie_players',
+    'flyordie_rooms',
+    'flyordie_ws_connections',
+    'flyordie_event_loop_utilization',
+    'flyordie_ws_messages_in_total',
+    'flyordie_ws_rejections_total',
+    'flyordie_process_resident_memory_bytes',
+    'flyordie_build_info',
+  ])
+    assert.ok(metrics.includes(name), `metric ${name}`);
+  // earlier tests were rejected for bad JSON, unknown types, rate limits…: counted by reason
+  assert.match(metrics, /flyordie_ws_rejections_total\{reason="bad_message"/);
+  assert.match(metrics, /flyordie_ws_rejections_total\{reason="policy"/);
+});
+
+test('handshake gate: a foreign Origin gets 403, the 9th socket from one IP gets 429', async () => {
+  const status = (headers: Record<string, string> = {}) =>
+    new Promise<number>((resolve) => {
+      const ws = new WebSocket(wsUrl, { headers });
+      ws.on('unexpected-response', (_req, res) => resolve(res.statusCode ?? 0));
+      ws.on('open', () => {
+        ws.close(); // a probe: don't keep the slot
+        resolve(101);
+      });
+      ws.on('error', () => {});
+    });
+  assert.equal(await status({ Origin: 'https://evil.example' }), 403);
+  assert.equal(await status({ Origin: base }), 101, 'same origin');
+  await new Promise((r) => setTimeout(r, 100));
+
+  const open: WebSocket[] = [];
+  for (let i = 0; i < 8; i++) {
+    const ws = new WebSocket(wsUrl);
+    await once(ws, 'open');
+    open.push(ws);
+  }
+  assert.equal(await status(), 429);
+  for (const ws of open) ws.close();
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(await status(), 101, 'closing frees the slots');
+  const metrics = await (await fetch(`${base}/metrics`)).text();
+  assert.match(metrics, /flyordie_ws_rejections_total\{reason="origin"[^}]*\} 1/);
+  assert.match(metrics, /flyordie_ws_rejections_total\{reason="ip_cap"[^}]*\} 1/);
 });
 
 const ReplaysSchema = z.object({

@@ -1,0 +1,22 @@
+# Keep the build context small and the image free of local junk.
+**/node_modules
+.git
+.github
+**/dist
+**/dist-profile
+coverage
+playwright-report
+test-results
+docs
+e2e
+**/test
+server/logs
+server/scripts
+client/tools
+**/*.cpuprofile
+**/.env
+**/.env.*
+!**/.env.example
+.claude
+.vscode
+*.md

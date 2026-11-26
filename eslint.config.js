@@ -36,6 +36,10 @@ export default tseslint.config(
     languageOptions: { globals: globals.node },
   },
   {
+    files: ['client/public/sw.js'],
+    languageOptions: { globals: globals.serviceworker },
+  },
+  {
     files: ['shared/**/*.ts'],
     languageOptions: { globals: globals['shared-node-browser'] },
   },

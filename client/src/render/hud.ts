@@ -5,6 +5,7 @@ import type { EntityId } from '@flyordie/shared/ids.ts';
 import type { ShipEffect } from '@flyordie/shared/sim/ship.ts';
 import type { LoopStats } from '../loop.ts';
 import type { Audio } from '../audio/audio.ts';
+import { APP_VERSION } from '../version.ts';
 
 // Readable over any terrain: warm white text with a dark drop shadow.
 const NEON = '#f4ecd0';
@@ -182,6 +183,10 @@ export function createHud(
         width - 16,
         height - 16,
       );
+      // Build stamp (Lab 8): which commit is this? Compare with the server's /health.
+      ctx.fillStyle = 'rgba(244, 236, 208, 0.45)';
+      ctx.font = '10px monospace';
+      ctx.fillText(APP_VERSION, width - 16, height - 4);
 
       // Pickup banner (centre, 1.2 s)
       if (banner) {

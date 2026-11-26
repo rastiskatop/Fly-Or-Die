@@ -4,11 +4,114 @@
 
 ![two clients dogfighting through an authoritative server at 100 ms ±30 ms latency, 2% packet loss](docs/lab-05/duel.gif)
 
-_Two independent clients (left: Red, right: Blue) on one authoritative Node server, both with 100 ms ±30 ms injected latency and 2% loss. Each client predicts its own plane, interpolates the other one ~100 ms in the past, and talks a binary `DataView` protocol at 30 Hz. The overlay is the netgraph._
+**▶ Play: LIVE_URL** — open it in two windows (or send it to a friend), pick a callsign, join the same battlefield. Installable as an app (PWA): "Install" in the browser's address bar, or "Add to Home Screen" on a phone.
 
-**Quick start:** `npm install`, then `npm run dev`, then open http://localhost:5173 in two windows and join the same battlefield. Or run `npm start` and open http://localhost:8787. Checks: `npm run typecheck`, `npm run lint`, `npm test` (100 Vitest tests), `npm run e2e` (Playwright, two browsers). Since Lab 6 everything is TypeScript (Node ≥ 22.18 runs the server's `.ts` files directly). VS Code Live Server serves the **built** client, so run `npm run build` once first.
+_Above: two independent clients on one authoritative server, both with 100 ms ±30 ms injected latency and 2 % packet loss. Each predicts its own plane, interpolates the other ~100 ms in the past and talks a binary `DataView` protocol at 30 Hz; the overlay is the netgraph (N)._
 
-> **Windows PowerShell:** if `npm` fails with *"running scripts is disabled on this system"* (`npm.ps1` is blocked by the default execution policy), run `npm.cmd run dev` / `npm.cmd start` instead, or allow local scripts once with `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+## How to play
+
+| Key | |
+| --- | --- |
+| **W** / ↑ | thrust |
+| **A D** / ← → | turn |
+| **Space** | fire |
+| **Esc** | back to the lobby |
+| **M** | sound on/off |
+| **N** | netgraph (RTT, snapshot age, corrections) |
+| **1–4** | simulate latency: 0 / 100 / 200 / 300 ms (you can't build netcode on localhost) |
+
+Shoot rocks and other pilots; big rocks split. Pickups: ⚡ speed ×2 for 10 s, ➶ bullet speed ×2, ✚ full repair. You respawn after 2 s with 2 s of protection.
+
+## Run it locally — three commands
+
+```powershell
+npm install
+npm run dev        # game server :8787 + Vite on http://localhost:5173 (open two windows)
+npm start          # or: production build, one process on http://localhost:8787
+```
+
+Production-like in a container: `docker compose up --build` → http://localhost:8787. Checks: `npm run typecheck`, `npm run lint`, `npm test` (Vitest), `npm run e2e` (Playwright). Live server metrics: `/dashboard.html` (and `/metrics`, `/health`, `/ready`).
+
+> **Windows PowerShell:** if `npm` fails with *"running scripts is disabled on this system"*, use `npm.cmd …`, or allow local scripts once: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  subgraph Browser["Browser (client/ — TypeScript, Canvas, Vite)"]
+    Input[keyboard] --> Pred["prediction: shared stepShipMotion<br/>+ reconciliation"]
+    Snap[snapshots] --> Interp["interpolation ~100 ms<br/>remote planes & rocks"]
+    Pred --> Render[Canvas renderer<br/>fixed-step loop]
+    Interp --> Render
+  end
+  subgraph Shared["shared/ — pure, deterministic"]
+    Sim["World · Ship · Bullet · Asteroid<br/>swept collisions · bit-exact trig"]
+    Proto["protocol: zod schemas +<br/>binary DataView codec"]
+  end
+  subgraph Server["server/ — Node 24, one process"]
+    WS["ws: gate (origin, IP cap) → validate<br/>→ rate limit → rooms"]
+    Match["Match per room: 30 Hz authoritative<br/>World.step, bots"]
+    Obs["pino JSON logs · /metrics · /health · /ready"]
+  end
+  Browser -- "inputs 30 Hz (binary, 3× redundant)" --> WS
+  WS --> Match
+  Match -- "snapshots 30 Hz (binary, per-client ack)" --> Browser
+  Pred -. uses .-> Sim
+  Match -. uses .-> Sim
+  WS -. uses .-> Proto
+  Browser -. uses .-> Proto
+```
+
+One codebase in three npm workspaces. The **same simulation code** runs on the server (authoritative) and in the browser (prediction). It is bit-identical across engines: the trig in `dmath.ts` uses only `+ − × ÷`, and the determinism hash is checked in CI. Every message crossing the wire is validated (zod or the binary decoder) before anyone sees it.
+
+## The numbers (all measured; details in the lab write-ups below)
+
+| What | Result |
+| --- | --- |
+| Snapshot size, JSON → binary `DataView` (Lab 5) | 3,764 → **448 bytes**, 110 → **13 KB/s** per client |
+| Prediction at 100 ms ±30 ms, 2 % loss (Lab 5) | **99 %** of corrections are exactly 0 (with `Math.random()` in the physics: 13 %) |
+| Client, 8 bots, 30 s (Lab 7): render CPU p99 | 3.2 → **1.7 ms** per frame; 1 missed frame of 1,804 |
+| Client allocations / major GCs (Lab 7) | 58 → **19 MB** per 30 s; 20 → **8** major GCs (2–9 ms incremental finalization) |
+| Server tick p99, 63 bots in one room (Lab 7) | 2.48 → **1.93 ms** (budget 33.3 ms) |
+| **Capacity, one process** (Lab 7 load test) | **128 clients** with margin (16 rooms of 8); the knee is ~200–256. The bottleneck is per-message socket I/O (`writev` 41 % of the thread), not the simulation (~5 %) or GC (< 1 %) |
+| Garbage flood, 11,680 junk frames/s (Lab 8) | every socket closed and counted; the bot room's tick p99 **3.22 → 2.51 ms**, unaffected |
+| Server killed mid-match (Lab 8) | client backoff 0.45 → 0.9 → 1.3 → 3.2 s, **rejoined 2.0 s** after the restart |
+| `SIGTERM` → exit 0 (Lab 8) | players get "server restarting" + close 1001; well under 10 s (CI checks `docker stop`) |
+| Real players, real internet (Lab 8) | see [Two remote players](#two-remote-players-the-honest-measurement) |
+
+## Known limitations — and why
+
+- **One server instance.** A room lives in one process's memory, so a round-robin load balancer would split a room between processes that don't know about each other. The capacity above is per instance; scaling out needs sticky routing by room or Redis pub/sub (see "What I'd do next").
+- **The free host sleeps.** Render's free plan stops the service after ~15 min without traffic; the first visitor then waits ~30–60 s while it starts. A paid instance (or a €4 VPS) removes this.
+- **No lag compensation.** Hits are decided on the server's present. A player with 150 ms RTT has to lead targets slightly more than one at 20 ms; the game is fast-paced but forgiving (big hitboxes), so this was the right trade for now.
+- **Remote planes are ~100 ms in the past** (the interpolation delay). That is the price of smooth motion through jitter; with `[`/`]` it can be lowered on a good connection.
+- **Rooms and scores are not persistent.** A restart clears them (the server says so to the players); there are no accounts.
+- **Free-tier region:** Frankfurt. Players far from Europe get higher RTT, and prediction hides that only for your own plane.
+
+## What I'd do next
+
+1. **Multiple instances:** route by room id (sticky sessions, e.g. Fly.io `fly-replay` or an nginx `hash` upstream), and later Redis pub/sub so a room can span instances.
+2. **Lag compensation:** rewind the hit check by the shooter's RTT (the server keeps a short history of positions already).
+3. **Batch socket writes** (the measured bottleneck): one write per client per tick instead of per message, or more processes, one per core.
+4. **Matchmaking and accounts:** quick-play into the emptiest room near you; persistent scores.
+5. **Error tracking** (Sentry) on top of the logs and metrics.
+
+## Tag history
+
+| Tag | Lab |
+| --- | --- |
+| `lab-01` | event loop, fixed-timestep game loop |
+| `lab-02` | entities, `this`, composition over inheritance |
+| `lab-03` | promises, async asset pipeline, sprites, Web Audio, lobby |
+| `lab-04` | Node server, rooms, WebSocket chat, streamed match logs |
+| `lab-05` | authoritative server, prediction, interpolation, binary protocol |
+| `lab-06` | TypeScript everywhere, zod protocol, typed events |
+| `lab-07` | tests (Vitest, fast-check, Playwright), profiling, pools, bots, load test |
+| `lab-08`, `v1.0.0` | production: Docker, CI/CD, observability, hardening, PWA, launch |
+
+---
+
+# Lab write-ups (the semester, lab by lab)
 
 ---
 
@@ -1113,3 +1216,104 @@ So the bottleneck is **per-message I/O**, not tick CPU and not GC. The next step
 - Варіант із передачею типізованих масивів економить лише 14 мкс на знімок.
 
 **Навантажувальний тест:** місткість — **128 клієнтів** на процес із запасом; межа — близько 200–256 клієнтів. Вузьке місце — запис у сокети (`writev`, 41 % часу), а не симуляція і не GC.
+
+---
+
+# FlyOrDie (Lab 8) — ship it: production Node, Docker, CI/CD, observability, launch
+
+## M1 — a production process
+
+- **Graceful `SIGTERM`.** `server.close()` (no new connections) → readiness turns 503 → every player gets a `system` message "Server is restarting" and then close **1001** → matches end, match logs are flushed → `exit 0`. A 5-s guard forces exit 1 if anything hangs, well inside a platform's 10-s grace period. Tested in `server/test/shutdown.test.ts`; CI times `docker stop` against the real image.
+- **`/health`** (liveness: the process answers, plus version, uptime, RSS) and **`/ready`** (readiness: 200 only while listening and not shutting down — the platform and the Docker `HEALTHCHECK` route traffic by it).
+- **Crash on unknowns.** `uncaughtException` / `unhandledRejection` → `log.fatal` with the stack → graceful shutdown → exit 1 → the supervisor restarts a clean process.
+- **Structured logs** (`pino`): one JSON line per event on stdout, with `playerId` / `roomId` on every connection event, `version` on every line, `LOG_LEVEL` from the environment, and redaction of anything named token/password/secret/dsn/cookie.
+- **`/metrics`** (`prom-client`):
+  - players, rooms, connections;
+  - messages in by type and out, bytes in/out;
+  - tick p99 per room;
+  - event-loop utilization;
+  - **rejections by reason** (origin, IP cap, bad message, rate limit, slow client, heartbeat…);
+  - Node's process metrics (RSS, heap, GC, event-loop lag);
+  - build info.
+
+  **`/dashboard.html`** shows them live:
+
+  ![server dashboard](docs/lab-08/dashboard.png)
+
+- **Version stamp.** The git commit is baked in at build time and shown in the HUD (bottom right, `1.0.0+abc1234`), in `/health` and in `/metrics`. The release pipeline waits until the public `/health` reports the tagged commit.
+- **Config** (zod, fails fast at startup): added `ALLOWED_ORIGINS`, `MAX_CONNECTIONS_PER_IP`, `TRUST_PROXY`, `LOG_LEVEL`, `GIT_SHA`, plus `HOST`, which defaults to `0.0.0.0` in production. Documented in `server/.env.example`; on Render they live in the service's Environment, never in git.
+
+## M2 — hardening, and chaos with metrics
+
+**Origin check and per-IP cap happen at the HTTP upgrade, before a WebSocket exists** (`server/src/gate.ts`):
+- **Origin.** CORS doesn't apply to WebSockets, so any page could open one to us with our users' cookies. The page's `Origin` must be our own origin (or listed in `ALLOWED_ORIGINS`), otherwise **403**. CI proves it against the container with a handshake from `https://evil.example`.
+- **Per-IP cap.** Behind Render's proxy the IP is taken from the **last** `X-Forwarded-For` entry, the one the proxy itself appended; anything before it can be forged. Over the cap the answer is **429**.
+- **The Lab 4 limits** (payload, rate, join timeout, slow client) are unchanged and now counted in `/metrics`.
+
+**Chaos tests** (`node server/scripts/chaos.ts` → `docs/lab-08/chaos.json`):
+
+| Scenario | What happened | Proof |
+| --- | --- | --- |
+| Garbage flood: 16 parallel attackers, **11,680 junk frames/s** (bad JSON + bad binary) for 12 s, while a 6-bot match runs in another room | 2,260 junk sockets, each closed on its first bad frame (code 4000), logged, counted | `ws_rejections_total{reason="bad_message"}` +2,260. **The bot room's tick p99: 3.22 ms without the flood → 2.51 ms with it**, 393 ticks in 12 s vs 390 (30 Hz held). The thread was busier (event loop 4 % → 63 %), but no tick was late |
+| A client killed mid-match (socket destroyed, no close frame) | The server sees the TCP close; the room and match go on | The other player's roster updated after **15 ms** |
+| The server killed mid-match (SIGKILL), down 3 s, restarted | The browser's own `Connection` class retries with exponential backoff + jitter: **0.45 → 0.93 → 1.3 → 3.2 s** (close 1006), then re-joins | Rejoined **2.0 s** after the restart |
+
+In the game, the player always lands somewhere clear. On a **planned restart (1001)** they go straight to the lobby: "The server is restarting (a new version is being deployed). Your match ended — pick a room again in a few seconds." On a **crash**, the client keeps reconnecting for 6 s; if that works the match just continues, otherwise the lobby shows "Lost the connection to the server…". The lobby's own "can't reach the server, retrying" stays on its status line, so it never overwrites that message.
+
+## M3 — container and pipeline
+
+- **`Dockerfile`, multi-stage.** Stage 1 has the whole workspace + dev deps and builds the client with Vite. Stage 2 has `node:24-alpine` + **only the production dependencies** of `server` and `shared` (14 MB: `ws`, `zod`, `pino`, `prom-client`) + `client/dist` + the `.ts` sources, which Node runs with native type stripping (no compiler in the image).
+- `package*.json` are copied before the sources, so `npm ci` stays cached across code changes.
+- The container runs as the non-root `node` user, with `tini` as PID 1 and an exec-form `CMD ["node", "server/src/index.ts"]`, so `SIGTERM` reaches Node and not a shell or npm.
+- `HEALTHCHECK` hits `/ready`; `.dockerignore` keeps tests, docs, logs and `.env` out.
+- `docker compose up --build` gives a production-like local run with a read-only filesystem.
+- **CI** (`ci.yml`, every push), two jobs:
+  1. the full gate from Lab 7;
+  2. **the image itself**: built, **size checked (< 200 MB)**, started, `/ready` polled, `/health` version = the commit, user = `node`, a foreign-origin handshake must get 403, then **`docker stop` timed: exit code 0 in < 10 s**. The numbers go to the job summary.
+- **Release** (`release.yml`, on a `v*` tag): the same CI gate → build and push to **GHCR** (`ghcr.io/rastiskatop/fly-or-die:<tag>` and `:latest`) → trigger the **Render** deploy hook → poll the public `/health` until it reports the tagged commit.
+- **Render** (`render.yaml` Blueprint): one Docker web service in Frankfurt with `healthCheckPath: /ready` and `TRUST_PROXY=true`. Render terminates TLS, so the page is `https://` and the socket `wss://` (the client derives `wss:` from the page itself). It proxies WebSocket upgrades; our 15-s heartbeats keep sockets alive through its idle timeout.
+
+## M4 — launch
+
+- **PWA:** `manifest.webmanifest` (fullscreen, landscape), icons drawn as SVG and rasterized in a real browser to 192/512 px, maskable and Apple variants (`client/tools/gen-icons.ts`). A small service worker: cache-first for hashed assets, network-first for the page, and it **never touches `/api`, `/ws`, `/health`, `/metrics`**. The game is installable on desktop and phones.
+
+### Two remote players: the honest measurement
+
+FILL-IN AFTER THE MATCH: who played (anonymized, e.g. "Player A — Kyiv, Wi-Fi; Player B — Lviv, mobile"), their netgraph RTT p50/p95, corrections, and the server's `/metrics` during the match (players, msg/s, tick p99, event-loop utilization). Plus a GIF or short video.
+
+## Reflection answers (short)
+
+1. **`SIGTERM` →** `server.close()`, readiness turns 503, a "restarting" message + close 1001 to every player, the matches end, the match logs flush, `exit 0` (with a 5-s guard). With `CMD npm start`, npm (or a shell) is PID 1 and doesn't forward `SIGTERM`, so after the grace period the container gets `SIGKILL`: no close frames, no flushed logs. Ignoring `SIGTERM` means the same thing: every deploy kills every match mid-flight.
+2. **Scaling WebSockets:** a REST request can go to any instance, but a room is state in one process's memory. Sticky sessions route by room id to a fixed instance; with Redis pub/sub, instances relay room events to each other, so a room can span them. I shipped **one instance** (capacity 128 with margin, measured) — simpler and correct — and documented the other two.
+3. **`wss://`:** an `https://` page may not open a `ws://` socket (mixed content). TLS is terminated at Render's edge, which forwards the upgrade to the container as plain HTTP. So the proxy must support `Upgrade` and its idle timeout must be longer than our 15-s heartbeat.
+4. **Origin:** a browser always sends the page's `Origin` on the handshake. We check it in the `upgrade` handler, before the socket exists (403 otherwise). Non-browser clients can forge it, so it protects *our users*, not *us*; rate limits and IP caps protect us.
+5. **Liveness vs readiness:** liveness asks "is the process alive?" — if not, restart it. Readiness asks "should it get traffic now?" — if not, stop routing to it without restarting. During a graceful shutdown we are alive but not ready.
+6. **JSON logs to stdout:** the platform collects and indexes stdout; JSON lines can be filtered by `roomId`/`playerId` and aggregated, while text in a file is lost with the container. pino keeps formatting off the hot path (pretty-printing is a separate process), because the event loop must not block on logging — the Lab 1 and Lab 4 lesson.
+7. **Multi-stage:** stage 1 holds dev dependencies, Vite, test tools and sources that the runtime doesn't need — size, attack surface, and secrets left in layers. `package*.json` go first so the `npm ci` layer stays cached until a dependency really changes.
+8. **Capacity × RTT:** see the remote-players section. With 128 clients per process and the knee at ~200, one instance serves 15–25 rooms of 8. European players get a playable RTT to Frankfurt (prediction hides it for your own plane). The first change would be batching socket writes, the measured bottleneck; then a second region/instance with room-sticky routing.
+9. **3 a.m. crash:** the uptime monitor emails me (it polls `/health`), and the platform restarts the container (exit 1, `HEALTHCHECK`). First I look at the `fatal` log line with its stack (`roomId`/`playerId` show which match), then at the dashboard just before it: rejections, event-loop utilization, RSS.
+
+---
+
+# FlyOrDie (Лабораторна 8) — випуск у прод
+
+**Процес:**
+- `SIGTERM`: гравці отримують повідомлення про перезапуск і код 1001, процес виходить з кодом 0 менш ніж за 10 с.
+- `/health` і `/ready`.
+- JSON-логи `pino` з `roomId`/`playerId`.
+- `/metrics` у форматі Prometheus і живий дашборд `/dashboard.html`.
+- Версія (git-коміт) видно в HUD і в `/health`.
+
+**Захист:**
+- Origin і ліміт з’єднань на IP перевіряються ще до WebSocket-рукостискання (403/429).
+- Chaos-тести:
+  - флуд 11 680 сміттєвих кадрів/с не вплинув на тік сусідньої кімнати (p99 3,22 → 2,51 мс);
+  - падіння сервера — клієнт перепідключився через 2 с після рестарту;
+  - при плановому перезапуску гравець потрапляє в лобі із зрозумілим повідомленням.
+
+**Контейнер і CI/CD:**
+- Двоетапний Dockerfile: Node 24 alpine, лише прод-залежності, не root, `tini`, exec-форма `CMD`, `HEALTHCHECK`.
+- CI на кожен пуш будує образ і перевіряє розмір (< 200 МБ), health, origin і `docker stop`.
+- Тег `v*` → CI → образ у GHCR → деплой на Render → перевірка, що публічний `/health` показує цей коміт.
+
+**Запуск:** PWA (встановлюється на телефон), README як сторінка продукту, гра двох віддалених гравців — дані після матчу.

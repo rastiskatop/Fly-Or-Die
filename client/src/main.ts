@@ -53,6 +53,14 @@ function setMenuMode(on: boolean): void {
 }
 setMenuMode(true);
 
+// PWA (Lab 8): the service worker makes the game installable. Production builds only — in dev it
+// would cache Vite's modules and serve stale code. Needs a secure context (https or localhost).
+if (import.meta.env.PROD && 'serviceWorker' in navigator && window.isSecureContext) {
+  navigator.serviceWorker.register('./sw.js').catch((err: unknown) => {
+    console.warn('[pwa] service worker not registered:', err instanceof Error ? err.message : err);
+  });
+}
+
 // Safety net: a rejection nobody handled is a bug — make it loud in the console.
 window.addEventListener('unhandledrejection', (e) => {
   console.error('[unhandledrejection]', e.reason);
@@ -281,7 +289,7 @@ async function main(): Promise<void> {
     }
     try {
       const joined = await connectToRoom(server, room, name);
-      await playOnlineMatch({
+      const ended = await playOnlineMatch({
         ctx,
         bounds,
         conn: joined.conn,
@@ -293,6 +301,7 @@ async function main(): Promise<void> {
         flags: netFlags,
         setMenuMode,
       });
+      if (ended) error = ended; // shown in the lobby (Lab 8: server restart / connection lost)
     } catch (err: unknown) {
       error = `Could not join ${room.name}: ${err instanceof Error ? err.message : String(err)}`;
     }

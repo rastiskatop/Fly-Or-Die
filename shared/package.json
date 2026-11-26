@@ -1,6 +1,6 @@
 {
   "name": "@flyordie/shared",
-  "version": "0.7.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Pure, deterministic game simulation + network protocol/codecs shared by client and server. No DOM, no Node built-ins.",

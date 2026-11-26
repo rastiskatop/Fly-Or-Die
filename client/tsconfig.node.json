@@ -1,6 +1,7 @@
 {
   // Node-side files of the client package: Vite/Vitest config and the asset generators.
+  // DOM is included because gen-icons.ts runs a function inside the browser (page.evaluate).
   "extends": "../tsconfig.base.json",
-  "compilerOptions": { "lib": ["ES2023"], "types": ["node"] },
+  "compilerOptions": { "lib": ["ES2023", "DOM"], "types": ["node"] },
   "include": ["vite.config.ts", "vitest.config.ts", "tools"]
 }

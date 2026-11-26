@@ -1,6 +1,28 @@
 import { defineConfig, type Plugin } from 'vite';
 import { writeFile, mkdir } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { resolve, dirname, sep } from 'node:path';
+
+/** "0.8.0+a1b2c3d": GIT_SHA (Docker build arg) / RENDER_GIT_COMMIT, else the local checkout. */
+function appVersion(): string {
+  const pkg: unknown = JSON.parse(
+    readFileSync(resolve(import.meta.dirname, '..', 'package.json'), 'utf8'),
+  );
+  const semver =
+    typeof pkg === 'object' && pkg && 'version' in pkg && typeof pkg.version === 'string'
+      ? pkg.version
+      : '0.0.0';
+  let sha = process.env.GIT_SHA ?? process.env.RENDER_GIT_COMMIT ?? '';
+  if (!sha) {
+    try {
+      sha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    } catch {
+      sha = 'dev'; // no git (e.g. a source tarball)
+    }
+  }
+  return `${semver}+${sha.slice(0, 7)}`;
+}
 
 // Dev-only test endpoints for the Lab 3 failure gallery (slow loading, flaky files, bad JSON).
 // The real API (/api, /health) and the WebSocket (/ws) live in the Node server (server/),
@@ -100,10 +122,22 @@ export default defineConfig({
   // Relative base: the build works from any sub-path (GitHub Pages, a folder on any host).
   base: './',
   plugins: [devTestApi()],
+  define: { __APP_VERSION__: JSON.stringify(appVersion()) },
+  // Two pages in the production build: the game and the live metrics dashboard (Lab 8).
+  build: {
+    rollupOptions: {
+      input: {
+        main: resolve(import.meta.dirname, 'index.html'),
+        dashboard: resolve(import.meta.dirname, 'dashboard.html'),
+      },
+    },
+  },
   server: {
     proxy: {
       '/api': SERVER,
       '/health': SERVER,
+      '/ready': SERVER,
+      '/metrics': SERVER,
       '/ws': { target: SERVER, ws: true },
     },
   },

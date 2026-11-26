@@ -1,6 +1,6 @@
 {
   "name": "flyordie",
-  "version": "0.7.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -21,7 +21,7 @@
     "coverage": "vitest run --coverage",
     "e2e": "playwright test",
     "lint": "eslint .",
-    "format": "prettier --write shared client/src client/test client/tools client/index.html client/duel.html client/worker-bench.html client/vite.config.ts client/vitest.config.ts server scripts e2e vitest.config.ts playwright.config.ts .github",
+    "format": "prettier --write shared client/src client/test client/tools client/index.html client/duel.html client/worker-bench.html client/dashboard.html client/public/sw.js client/public/manifest.webmanifest client/vite.config.ts client/vitest.config.ts server scripts e2e vitest.config.ts playwright.config.ts .github",
     "typecheck": "tsc -p tsconfig.json && npm run typecheck --workspaces"
   },
   "devDependencies": {

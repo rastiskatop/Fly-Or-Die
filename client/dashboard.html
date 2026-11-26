@@ -1,0 +1,85 @@
+<!doctype html>
+<!-- Live server metrics (Lab 8). Served by the game server at /dashboard.html; reads /metrics. -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FlyOrDie — server dashboard</title>
+    <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        padding: 20px;
+        background: #1a1712;
+        color: #e8dcb5;
+        font:
+          14px system-ui,
+          sans-serif;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 20px;
+        letter-spacing: 0.04em;
+      }
+      #status {
+        margin-bottom: 16px;
+        font-size: 12px;
+      }
+      #status.ok {
+        color: #8fbf5a;
+      }
+      #status.down {
+        color: #e0604c;
+      }
+      #tiles {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 12px;
+      }
+      .tile {
+        background: #2a2619;
+        border: 1px solid #4a4430;
+        border-radius: 6px;
+        padding: 10px 12px 8px;
+      }
+      .tile.warn {
+        border-color: #e0604c;
+      }
+      .tile h2 {
+        margin: 0;
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #b9ac85;
+      }
+      .tile .v {
+        font:
+          600 26px/1.3 ui-monospace,
+          monospace;
+      }
+      .tile canvas {
+        width: 100%;
+        height: 40px;
+      }
+      #detail {
+        margin-top: 16px;
+        white-space: pre-wrap;
+        font:
+          12px/1.6 ui-monospace,
+          monospace;
+        color: #b9ac85;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>FlyOrDie · server</h1>
+    <div id="status">connecting…</div>
+    <div id="tiles"></div>
+    <div id="detail"></div>
+    <script type="module" src="./src/dashboard.ts"></script>
+  </body>
+</html>

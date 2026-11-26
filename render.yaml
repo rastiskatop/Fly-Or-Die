@@ -1,0 +1,25 @@
+# Render Blueprint (Lab 8): "New → Blueprint" in the Render dashboard, pick this repository.
+# One web service, built from the Dockerfile. Render terminates TLS (https:// and wss://) and
+# proxies WebSocket upgrades to the container; our 15-s heartbeats keep idle sockets alive.
+services:
+  - type: web
+    name: flyordie
+    runtime: docker
+    plan: free # sleeps after ~15 min without traffic; the first visitor waits ~30-60 s
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /ready
+    # Deploys come from the release pipeline (a v* tag → GitHub Actions → deploy hook),
+    # not from every push to main.
+    autoDeploy: false
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY # the client IP is in X-Forwarded-For behind Render's proxy
+        value: 'true'
+      - key: LOG_LEVEL
+        value: info
+      - key: MAX_CONNECTIONS_PER_IP
+        value: '16'
+      - key: MAX_ROOMS
+        value: '20'

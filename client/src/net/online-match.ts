@@ -11,7 +11,7 @@ import { physics } from '@flyordie/shared/sim/ship.ts';
 import { botButtons } from '@flyordie/shared/bot.ts';
 import type { ArenaRules } from '@flyordie/shared/sim/arena.ts';
 import type { Bounds } from '@flyordie/shared/sim/ship.ts';
-import type { CodecName, RoomInfo } from '@flyordie/shared/net/messages.ts';
+import { CLOSE, type CodecName, type RoomInfo } from '@flyordie/shared/net/messages.ts';
 import type { Connection } from './connection.ts';
 import type { NetSimSettings } from './netgraph.ts';
 import type { Input } from '../input.ts';
@@ -56,7 +56,8 @@ export function readNetFlags(search = location.search): NetFlags {
 }
 
 /**
- * One online match against the authoritative server. Resolves when the player presses Esc.
+ * One online match against the authoritative server. Resolves with null when the player presses
+ * Esc, or with a message for the lobby when the server went away (restart, crash, refusal).
  * The client runs its fixed loop at the server's tick rate: one step = one input = DT.
  */
 export function playOnlineMatch({
@@ -81,7 +82,7 @@ export function playOnlineMatch({
   arena: ArenaRules;
   flags: NetFlags;
   setMenuMode: (on: boolean) => void;
-}): Promise<void> {
+}): Promise<string | null> {
   const match = new AbortController();
   const { signal } = match;
 
@@ -231,19 +232,61 @@ export function playOnlineMatch({
   if (import.meta.env.DEV) window.net = net; // console access for the defense (net.stats, net.pending, …)
   if (perfExposed) window.perf = perf; // ?perf=1: the Lab 7 profiler script reads perf.report()
 
-  return new Promise((resolve) => {
-    window.addEventListener(
-      'keydown',
-      (e) => {
-        if (e.code !== 'Escape') return;
-        loop.stop();
-        match.abort();
-        physics.chaos = false;
-        setMenuMode(true);
-        conn.close(1000, 'left the match');
-        resolve();
+  // How the match ends: Esc (null), or a message for the lobby when the server went away (Lab 8).
+  return new Promise<string | null>((resolve) => {
+    const finish = (why: string | null): void => {
+      loop.stop();
+      match.abort();
+      physics.chaos = false;
+      setMenuMode(true);
+      conn.close(1000, 'left the match');
+      resolve(why);
+    };
+    window.addEventListener('keydown', (e) => e.code === 'Escape' && finish(null), { signal });
+
+    // Server going away mid-match:
+    //  - 1001: a planned restart (deploy / SIGTERM) — the server said so. Back to the lobby now.
+    //  - anything else: a crash or a network drop. The Connection reconnects with backoff and
+    //    re-joins; if that works within RECONNECT_GRACE_MS the match just continues, otherwise
+    //    the player lands in the lobby with a clear message (the lobby keeps retrying the server).
+    let lost: ReturnType<typeof setTimeout> | undefined;
+    signal.addEventListener('abort', () => clearTimeout(lost));
+    conn.on(
+      'close',
+      ({ code }) => {
+        if (code === CLOSE.GOING_AWAY) {
+          finish(
+            'The server is restarting (a new version is being deployed). Your match ended — pick a room again in a few seconds.',
+          );
+          return;
+        }
+        lost ??= setTimeout(
+          () =>
+            finish(
+              `Lost the connection to the server (code ${code}). It may be restarting — the room list refreshes by itself.`,
+            ),
+          RECONNECT_GRACE_MS,
+        );
+      },
+      { signal },
+    );
+    conn.on(
+      'welcome',
+      () => {
+        clearTimeout(lost); // reconnected and re-joined in time: keep playing
+        lost = undefined;
+      },
+      { signal },
+    );
+    conn.on(
+      'status',
+      ({ state, code }) => {
+        // The server refused us on purpose after a reconnect (e.g. the room no longer exists).
+        if (state === 'closed') finish(`Disconnected by the server (code ${code ?? '?'}).`);
       },
       { signal },
     );
   });
 }
+
+const RECONNECT_GRACE_MS = 6000;

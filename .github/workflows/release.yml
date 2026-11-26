@@ -1,0 +1,73 @@
+# Continuous delivery (Lab 8): pushing a tag v* releases it.
+#   1. the full CI gate (same workflow as every push)
+#   2. build the image, push it to GitHub Container Registry: ghcr.io/<owner>/<repo>:<tag> and :latest
+#   3. trigger the Render deploy hook, then wait until the public /health reports THIS commit
+# Repository secrets/variables (Settings → Secrets and variables → Actions):
+#   secret   RENDER_DEPLOY_HOOK_URL   from Render: the service → Settings → Deploy Hook
+#   variable PUBLIC_URL               e.g. https://flyordie.onrender.com
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  image:
+    needs: ci
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          build-args: GIT_SHA=${{ github.sha }}
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ github.ref_name }}
+            ${{ steps.meta.outputs.image }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: image
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Trigger the Render deploy
+        env:
+          HOOK: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$HOOK" ]; then echo "::error::RENDER_DEPLOY_HOOK_URL secret is not set"; exit 1; fi
+          curl -fsS -X POST "$HOOK" > /dev/null
+          echo "deploy triggered"
+      - name: Wait until the public /health runs this commit
+        env:
+          URL: ${{ vars.PUBLIC_URL }}
+        run: |
+          if [ -z "$URL" ]; then echo "::warning::PUBLIC_URL variable not set — skipping verification"; exit 0; fi
+          want="${GITHUB_SHA::7}"
+          for i in $(seq 1 60); do
+            got=$(curl -fsS "$URL/health" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p' || true)
+            echo "attempt $i: running ${got:-?}, want $want"
+            if [ "$got" = "$want" ]; then echo "### Deployed $want to $URL" >> "$GITHUB_STEP_SUMMARY"; exit 0; fi
+            sleep 15
+          done
+          echo "::error::$URL did not report $want within 15 minutes"
+          exit 1
