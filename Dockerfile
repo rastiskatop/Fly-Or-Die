@@ -4,10 +4,14 @@
 #   runtime : node + production dependencies of server/shared + client/dist. No compiler, no Vite,
 #             no tests, no dev deps — the server runs its .ts files with Node's native type stripping.
 
-ARG NODE_VERSION=24-alpine
+# Build on Debian (glibc): Vite 8's native parts (rolldown, lightningcss) failed to build the client
+# on Alpine/musl in CI, while the same build passes on glibc. The RUNTIME stays Alpine — it has no
+# native modules (ws, zod, pino, prom-client), so the small base is safe there.
+ARG BUILD_IMAGE=node:24-slim
+ARG RUNTIME_IMAGE=node:24-alpine
 
 # ---------- stage 1: build ----------
-FROM node:${NODE_VERSION} AS build
+FROM ${BUILD_IMAGE} AS build
 WORKDIR /app
 # Lockfile + package manifests FIRST: this layer (npm ci) is cached until a dependency changes,
 # so a one-line code change doesn't re-download node_modules.
@@ -24,7 +28,7 @@ ARG RENDER_GIT_COMMIT=""
 RUN GIT_SHA="${GIT_SHA:-$RENDER_GIT_COMMIT}" npm run build -w client
 
 # ---------- stage 2: runtime ----------
-FROM node:${NODE_VERSION} AS runtime
+FROM ${RUNTIME_IMAGE} AS runtime
 # tini as PID 1: forwards SIGTERM to node and reaps zombies (Node's docker best practices).
 RUN apk add --no-cache tini
 WORKDIR /app
