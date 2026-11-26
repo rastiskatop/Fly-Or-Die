@@ -1,11 +1,4 @@
-export const bounds = { 
-  width: window.innerWidth, 
-  height: window.innerHeight 
-};
-
-export function wrap(entity) {
-  if (entity.x < 0) entity.x += bounds.width;
-  if (entity.x >= bounds.width) entity.x -= bounds.width;
-  if (entity.y < 0) entity.y += bounds.height;
-  if (entity.y >= bounds.height) entity.y -= bounds.height;
-}
+// Fixed logical arena size. The simulation must not depend on the browser window:
+// in Lab 5 every client and the server have to agree on the same arena.
+// The canvas is scaled with CSS to fit the window (see render/canvas.js).
+export const bounds = Object.freeze({ width: 1280, height: 720 });

@@ -6,7 +6,7 @@ export function createLoop({ step = 1 / 60, simulate, render }) {
   let frames = 0;
   let steps = 0;
   let lastFpsTime = last;
-  
+
   const stats = { fps: 0, ups: 0, frameTime: 0 };
 
   function frame(now) {
@@ -14,7 +14,7 @@ export function createLoop({ step = 1 / 60, simulate, render }) {
     let dt = (now - last) / 1000;
     last = now;
 
-    accumulator += Math.min(dt, 0.25); 
+    accumulator += Math.min(dt, 0.25);
 
     while (accumulator >= step) {
       simulate(step);
@@ -43,6 +43,6 @@ export function createLoop({ step = 1 / 60, simulate, render }) {
       rafId = requestAnimationFrame(frame);
     },
     stop: () => cancelAnimationFrame(rafId),
-    getStats: () => stats
+    getStats: () => stats,
   };
 }

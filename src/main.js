@@ -1,47 +1,49 @@
 import { createLoop } from './loop.js';
 import { createInput } from './input.js';
-import { createShip, integrate } from './sim/ship.js';
-import { bounds, wrap } from './sim/arena.js';
+import { bounds } from './sim/arena.js';
+import { createGame } from './sim/game.js';
 import { setupCanvas } from './render/canvas.js';
-import { drawGrid, drawShip, drawHud, lerpAngle } from './render/draw.js';
+import { drawGrid, drawWorld, drawHud } from './render/draw.js';
+import { demonstrateThisBug } from './experiments/this-bug.js';
 
 const { ctx } = setupCanvas('gameCanvas', bounds);
 const input = createInput(window);
+const { world, player } = createGame({ width: bounds.width, height: bounds.height });
 
-let previousState = createShip(bounds.width / 2, bounds.height / 2);
-let currentState = { ...previousState };
-
-function simulate(dt) {
-  previousState = { ...currentState };
-  
-  integrate(currentState, input, dt);
-  wrap(currentState);
-  
-  input.consume(); 
+// Inputs are plain data keyed by ship id — the same shape the server will receive in Lab 5.
+function readControls() {
+  return {
+    left: input.isDown('KeyA') || input.isDown('ArrowLeft'),
+    right: input.isDown('KeyD') || input.isDown('ArrowRight'),
+    thrust: input.isDown('KeyW') || input.isDown('ArrowUp'),
+    fire: input.isDown('Space'),
+  };
 }
 
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+});
+
+function simulate(dt) {
+  world.step(dt, new Map([[player.id, readControls()]]));
+  input.consume();
+}
+
+let renderTime = 0;
 function render(alpha) {
+  renderTime = performance.now() / 1000;
   ctx.clearRect(0, 0, bounds.width, bounds.height);
   drawGrid(ctx, bounds.width, bounds.height);
-
-  let lerpX = previousState.x + (currentState.x - previousState.x) * alpha;
-  let lerpY = previousState.y + (currentState.y - previousState.y) * alpha;
-
-  if (Math.abs(currentState.x - previousState.x) > bounds.width / 2) lerpX = currentState.x;
-  if (Math.abs(currentState.y - previousState.y) > bounds.height / 2) lerpY = currentState.y;
-
-  const lerpedAngle = lerpAngle(previousState.angle, currentState.angle, alpha);
-
-  const renderState = {
-    x: lerpX,
-    y: lerpY,
-    angle: lerpedAngle,
-    thrusting: currentState.thrusting
-  };
-
-  drawShip(ctx, renderState);
-  drawHud(ctx, loop.getStats());
+  drawWorld(ctx, world, alpha, renderTime);
+  drawHud(ctx, { stats: loop.getStats(), world, player, ...bounds });
 }
 
 const loop = createLoop({ step: 1 / 60, simulate, render });
 loop.start();
+
+// Dev-only handles for console experiments at the defense (prototype chain, `this`, Map).
+if (import.meta.env.DEV) {
+  window.game = { world, player };
+  if (new URLSearchParams(location.search).get('demo') === 'this')
+    demonstrateThisBug(player, world);
+}

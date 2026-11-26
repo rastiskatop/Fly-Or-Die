@@ -15,6 +15,6 @@ export function createInput(target) {
   return {
     isDown: (code) => down.has(code),
     justPressed: (code) => pressedThisFrame.has(code),
-    consume: () => pressedThisFrame.clear()
+    consume: () => pressedThisFrame.clear(),
   };
 }
