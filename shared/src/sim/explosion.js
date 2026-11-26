@@ -1,3 +1,4 @@
+import { dsin, dcos } from './dmath.js';
 import { Entity } from './entity.js';
 
 // A short-lived cloud of particles. Particles are plain objects allocated per explosion —
@@ -26,8 +27,8 @@ export class Explosion extends Entity {
       this.particles.push({
         x: 0,
         y: 0,
-        vx: Math.cos(a) * s,
-        vy: Math.sin(a) * s,
+        vx: dcos(a) * s,
+        vy: dsin(a) * s,
         size: 1 + rng() * 2.5,
       });
     }

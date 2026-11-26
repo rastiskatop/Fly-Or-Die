@@ -21,6 +21,8 @@ export class Connection extends EventTarget {
 
   constructor(url, { baseMs = 500, maxMs = 8000 } = {}) {
     super();
+    this.bytesIn = 0;
+    this.bytesOut = 0;
     this.url = url;
     this.baseMs = baseMs;
     this.maxMs = maxMs;
@@ -43,6 +45,7 @@ export class Connection extends EventTarget {
     this.#setState(this.#attempt ? 'reconnecting' : 'connecting', { attempt: this.#attempt });
 
     const ws = new WebSocket(this.url);
+    ws.binaryType = 'arraybuffer'; // binary frames (Lab 5 snapshots) arrive as ArrayBuffer, not Blob
     this.#ws = ws;
     ws.addEventListener('open', () => {
       this.#attempt = 0;
@@ -50,6 +53,12 @@ export class Connection extends EventTarget {
       this.#emit('open');
     });
     ws.addEventListener('message', (e) => {
+      if (e.data instanceof ArrayBuffer) {
+        this.bytesIn += e.data.byteLength;
+        this.#emit('binary', e.data);
+        return;
+      }
+      this.bytesIn += e.data.length; // ≈ bytes (control messages are ASCII-ish)
       let msg;
       try {
         msg = JSON.parse(e.data);
@@ -83,7 +92,17 @@ export class Connection extends EventTarget {
   /** Sends immediately; only valid while open (used for the join handshake). */
   sendNow(msg) {
     if (this.#ws?.readyState !== WebSocket.OPEN) return false;
-    this.#ws.send(JSON.stringify({ v: 1, ...msg }));
+    const text = JSON.stringify({ v: 1, ...msg });
+    this.#ws.send(text);
+    this.bytesOut += text.length;
+    return true;
+  }
+
+  /** Hot path (Lab 5 inputs): an already-encoded frame — binary (Uint8Array) or JSON text. Never queued. */
+  sendRaw(data) {
+    if (!this.#ready || this.#ws?.readyState !== WebSocket.OPEN) return false;
+    this.#ws.send(data);
+    this.bytesOut += typeof data === 'string' ? data.length : data.byteLength;
     return true;
   }
 

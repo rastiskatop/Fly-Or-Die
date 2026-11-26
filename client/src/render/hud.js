@@ -1,4 +1,4 @@
-import { PICKUP_TYPES } from '../sim/pickup.js';
+import { PICKUP_TYPES } from '@flyordie/shared/sim/pickup.js';
 
 // Readable over any terrain: warm white text with a dark drop shadow.
 const NEON = '#f4ecd0';
@@ -16,7 +16,9 @@ export function createHud(world, { playerId, signal } = {}) {
   let scoreFlash = 0;
   let damageFlash = 0;
   const now = () => performance.now() / 1000;
-  const mine = (d) => d.shipId === undefined || d.shipId === playerId || d.id === playerId;
+  const pid = () => (typeof playerId === 'function' ? playerId() : playerId); // value or getter
+  // "is this event about my ship?" — events name the ship shipId (scored, pickup) or id (hit)
+  const mine = (d) => (d.shipId ?? d.id) === pid();
   const on = (type, fn) => world.addEventListener(type, (e) => fn(e.detail), { signal });
 
   on('scored', (d) => {
@@ -116,7 +118,7 @@ export function createHud(world, { playerId, signal } = {}) {
       ctx.font = '12px "Russo One", monospace';
       const sound = audio.muted ? 'muted' : audio.state;
       ctx.fillText(
-        `W/↑ thrust · A D/← → turn · SPACE fire · M sound (${sound}) · Esc lobby`,
+        `W/↑ thrust · A D/← → turn · SPACE fire · M sound (${sound}) · N netgraph · Esc lobby`,
         width - 16,
         height - 16,
       );

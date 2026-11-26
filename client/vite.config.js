@@ -1,4 +1,6 @@
 import { defineConfig } from 'vite';
+import { writeFile, mkdir } from 'node:fs/promises';
+import { resolve, dirname, sep } from 'node:path';
 
 // Dev-only test endpoints for the Lab 3 failure gallery (slow loading, flaky files, bad JSON).
 // The real API (/api, /health) and the WebSocket (/ws) live in the Node server (server/),
@@ -46,6 +48,25 @@ function devTestApi() {
             res.setHeader('Location', `/${key}`);
             res.end();
           }
+          return;
+        }
+
+        // POST /__save/<file> — dev-only: the duel recorder (duel.html) saves its GIF into docs/
+        if (req.method === 'POST' && path.startsWith('/__save/')) {
+          const docs = resolve(import.meta.dirname, '..', 'docs');
+          const target = resolve(docs, decodeURIComponent(path.slice('/__save/'.length)));
+          if (!target.startsWith(docs + sep) || !/.(gif|png)$/.test(target)) {
+            res.statusCode = 403;
+            res.end('only docs/*.gif|png');
+            return;
+          }
+          const chunks = [];
+          req.on('data', (c) => chunks.push(c));
+          req.on('end', async () => {
+            await mkdir(dirname(target), { recursive: true });
+            await writeFile(target, Buffer.concat(chunks));
+            res.end(`saved ${target}`);
+          });
           return;
         }
 

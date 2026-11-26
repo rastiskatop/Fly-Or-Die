@@ -1,7 +1,7 @@
 import { createLoop } from './loop.js';
 import { createInput } from './input.js';
-import { bounds } from './sim/arena.js';
-import { createGame, DEFAULT_ARENA } from './sim/game.js';
+import { bounds } from '@flyordie/shared/sim/arena.js';
+import { createGame, DEFAULT_ARENA } from '@flyordie/shared/sim/game.js';
 import { setupCanvas } from './render/canvas.js';
 import { drawWorld } from './render/draw.js';
 import { createBattlefield } from './render/battlefield.js';
@@ -27,8 +27,11 @@ import { runPuzzles } from './experiments/puzzles.js';
 import { findServer } from './net/server.js';
 import { Connection } from './net/connection.js';
 import { showChat } from './net/chat-view.js';
+import { playOnlineMatch, readNetFlags } from './net/online-match.js';
+import { simulationHash } from '@flyordie/shared/sim/determinism.js';
 
 const flags = readDebugFlags();
+const netFlags = readNetFlags();
 const { ctx } = setupCanvas('gameCanvas', bounds);
 const input = createInput(window);
 const audio = createAudio();
@@ -104,7 +107,9 @@ function buildAssets(loaded) {
 function connectToRoom(server, room, name) {
   const conn = new Connection(server.wsUrl);
   conn.selfId = null;
-  conn.addEventListener('open', () => conn.sendNow({ type: 'join', room: room.id, name }));
+  conn.addEventListener('open', () =>
+    conn.sendNow({ type: 'join', room: room.id, name, codec: netFlags.codec }),
+  );
   conn.addEventListener('welcome', (e) => {
     conn.selfId = e.detail.playerId;
     conn.markReady(); // flush chat typed while we were reconnecting
@@ -207,6 +212,10 @@ function playMatch({ room, name, assets, conn = null }) {
 // ---------- the whole app as one async flow ----------
 async function main() {
   if (flags.demo === 'puzzles') await runPuzzles();
+  if (flags.demo === 'determinism') {
+    // Compare with `npm test -w shared` in Node: the hashes must be identical.
+    console.info('[determinism] browser hash after 600 steps:', simulationHash(600));
+  }
 
   const loaded = await runLoadingScreen(ctx, bounds, loadEverything);
   const assets = buildAssets(loaded);
@@ -220,8 +229,27 @@ async function main() {
   });
   if (IS_DEV) window.lobby = lobby;
 
+  // ?join=eu-1&name=Red — join straight away (the duel recorder and headless demos use it)
+  const q = new URLSearchParams(location.search);
+  let autoJoin = q.get('join') ? { room: q.get('join'), name: q.get('name') ?? 'Pilot' } : null;
+
   let error = null;
   for (;;) {
+    if (autoJoin) {
+      const target = autoJoin;
+      autoJoin = null;
+      lobby.addEventListener(
+        'rooms',
+        () => {
+          try {
+            lobby.join(target.room, target.name);
+          } catch (err) {
+            console.warn('[autojoin]', err.message);
+          }
+        },
+        { once: true },
+      );
+    }
     ctx.clearRect(0, 0, bounds.width, bounds.height);
     const { room, name } = await showLobby(document.getElementById('lobby'), lobby, {
       notices: assets.notices,
@@ -235,7 +263,18 @@ async function main() {
     }
     try {
       const joined = await connectToRoom(server, room, name);
-      await playMatch({ room: joined.room, name, assets, conn: joined.conn });
+      await playOnlineMatch({
+        ctx,
+        bounds,
+        conn: joined.conn,
+        room: joined.room,
+        assets,
+        input,
+        audio,
+        arena: assets.arenas[joined.room.arena] ?? DEFAULT_ARENA,
+        flags: netFlags,
+        setMenuMode,
+      });
     } catch (err) {
       error = `Could not join ${room.name}: ${err.message}`;
     }

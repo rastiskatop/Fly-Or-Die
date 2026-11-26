@@ -1,5 +1,6 @@
 import http from 'node:http';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readdir, readFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { WebSocketServer } from 'ws';
 import { loadConfig } from './config.js';
 import { RoomManager, seedDefaultRooms } from './rooms.js';
@@ -9,14 +10,59 @@ import { createApiHandler } from './http/api.js';
 import { sendError } from './http/respond.js';
 import { attachWebSockets } from './ws.js';
 import { log } from './logger.js';
+import { Match } from './match.js';
+import { DEFAULT_ARENA } from '@flyordie/shared/sim/game.js';
 
 const config = loadConfig();
 await mkdir(config.logDir, { recursive: true }); // top-level await: ESM only
 
-const stats = { connections: 0, dropped: 0 };
+const stats = { connections: 0, dropped: 0, bytesIn: 0, bytesOut: 0 };
+
+// Arena definitions shared with the client (client/public/assets/arenas/*.json)
+const arenas = {};
+for (const file of (await readdir(config.arenaDir).catch(() => [])).filter((f) =>
+  f.endsWith('.json'),
+)) {
+  try {
+    const arena = JSON.parse(await readFile(join(config.arenaDir, file), 'utf8'));
+    arenas[arena.id ?? file.replace('.json', '')] = arena;
+  } catch (err) {
+    log.warn('bad arena file, using defaults', { file, err: err.message });
+  }
+}
 const rooms = new RoomManager({
   maxRooms: config.maxRooms,
   maxPlayersPerRoom: config.maxPlayersPerRoom,
+});
+
+// ---------- authoritative matches (Lab 5): one 30 Hz simulation per room with players ----------
+const matches = new Map(); // roomId -> Match
+rooms.on('roomCreated', (room) => {
+  room.on('matchStart', () => {
+    const match = new Match({ roomId: room.id, arena: arenas[room.arena] ?? DEFAULT_ARENA });
+    matches.set(room.id, match);
+    sockets.wireMatch(match);
+    match.on('snapshot', ({ events }) => {
+      for (const e of events) {
+        if (e.type === 'exploded' && e.kind === 'ship') room.record('kill', { ship: e.shipId });
+        if (e.type === 'pickup') room.record('pickup', { ship: e.shipId, effect: e.effect });
+      }
+    });
+    match.start();
+    log.info('match started', { room: room.id, arena: room.arena });
+  });
+  // Registered before ws.js wires the room, so the ship exists when the roster is broadcast.
+  room.on('join', (player) => {
+    player.shipId = matches.get(room.id)?.addPlayer(player.id, player.name);
+  });
+  room.on('leave', (player) => matches.get(room.id)?.removePlayer(player.id));
+  room.on('matchEnd', () => {
+    const match = matches.get(room.id);
+    if (!match) return;
+    match.stop();
+    matches.delete(room.id);
+    log.info('match stopped', { room: room.id, ticks: match.stats.ticks });
+  });
 });
 
 // ---------- match logs: one NDJSON file per match, streamed ----------
@@ -35,7 +81,15 @@ rooms.on('roomCreated', (room) => {
 
 // ---------- HTTP ----------
 const serveStatic = createStaticHandler(config.staticDir);
-const handleApi = createApiHandler({ config, rooms, stats });
+const handleApi = createApiHandler({
+  config,
+  rooms,
+  stats,
+  netStats: () => ({
+    matches: [...matches.values()].map((m) => m.statsJSON()),
+    connections: sockets.connectionStats(),
+  }),
+});
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost'); // req.url is only the path + query
@@ -52,7 +106,7 @@ server.on('clientError', (err, socket) => socket.end('HTTP/1.1 400 Bad Request\r
 
 // ---------- WebSocket on /ws (same port: HTTP Upgrade) ----------
 const wss = new WebSocketServer({ noServer: true, maxPayload: config.maxPayloadBytes });
-const sockets = attachWebSockets(wss, { rooms, config, stats });
+const sockets = attachWebSockets(wss, { rooms, matches, config, stats });
 server.on('upgrade', (req, socket, head) => {
   if (new URL(req.url, 'http://localhost').pathname !== '/ws') {
     socket.end('HTTP/1.1 404 Not Found\r\n\r\n');

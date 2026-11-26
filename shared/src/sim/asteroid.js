@@ -1,7 +1,8 @@
 import { Entity } from './entity.js';
 
 // size 3 = big, 2 = medium, 1 = small. A destroyed asteroid splits into two of size - 1.
-const RADIUS = { 1: 14, 2: 26, 3: 42 };
+export const ASTEROID_RADIUS = { 1: 14, 2: 26, 3: 42 };
+const RADIUS = ASTEROID_RADIUS;
 const HP = { 1: 25, 2: 50, 3: 100 };
 export const ASTEROID_SCORE = { 1: 30, 2: 20, 3: 10 };
 

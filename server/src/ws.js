@@ -2,19 +2,21 @@ import { randomUUID } from 'node:crypto';
 import { parseClientMessage, encode, CLOSE } from './protocol.js';
 import { TokenBucket } from './rate-limit.js';
 import { log } from './logger.js';
+import { TICK_RATE } from '@flyordie/shared/net/protocol.js';
+import * as binaryCodec from '@flyordie/shared/net/codec-binary.js';
+import * as jsonCodec from '@flyordie/shared/net/codec-json.js';
 
 /**
  * Connection lifecycle for every WebSocket:
  *
  *   connect ──(join within JOIN_TIMEOUT_MS)──▶ in room ──(leave / close / error)──▶ gone
  *      │                                          │
- *      └─ no join in time → close 4003            ├─ every message: rate limit → validate → dispatch
+ *      └─ no join in time → close 4003            ├─ every message: [netsim delay/drop] → rate limit
+ *                                                 │   → validate → dispatch
+ *                                                 ├─ 30 Hz: snapshot (binary or JSON) with this client's ack
  *                                                 └─ heartbeat: ping every HEARTBEAT_MS, 2 missed pongs → terminate
- *
- * Per-socket state lives in a WeakMap-free plain object attached as `socket.state`.
  */
-export function attachWebSockets(wss, { rooms, config, stats }) {
-  // ---------- room → sockets broadcast ----------
+export function attachWebSockets(wss, { rooms, matches, config, stats }) {
   const socketsByRoom = new Map(); // roomId -> Set<socket>
 
   function roomSockets(roomId) {
@@ -23,28 +25,51 @@ export function attachWebSockets(wss, { rooms, config, stats }) {
     return set;
   }
 
+  // ---------- latency injector (Lab 5) ----------
+  // Per connection: { lagMs, jitterMs, dropPct } set by the client's 'netsim' message.
+  // Each direction gets lag/2 + random jitter. WebSocket is TCP: messages never overtake each other,
+  // so a message is never scheduled earlier than the previous one in the same direction.
+  // Drops only apply to "unreliable" traffic — snapshots down and inputs up — like UDP would.
+  function netDelay(state, dir) {
+    const { lagMs, jitterMs } = state.netsim;
+    if (!lagMs && !jitterMs) return 0;
+    const now = performance.now();
+    const at = Math.max(state[dir], now + lagMs / 2 + Math.random() * jitterMs);
+    state[dir] = at;
+    return at - now;
+  }
+  const dropped = (state) => state.netsim.dropPct > 0 && Math.random() * 100 < state.netsim.dropPct;
+
   /**
-   * Slow-client policy. bufferedAmount = bytes queued in this process for that socket but not yet
-   * handed to the network — it grows when the client (or its link) can't keep up.
-   *  - over the threshold: drop NON-critical messages (chat, system) for that client
-   *  - over 4× the threshold: the client is hopeless → terminate it
-   * Critical messages (welcome, roster, error) are always sent.
+   * Slow-client policy (Lab 4): bufferedAmount over the threshold → drop non-critical messages
+   * (chat, system, snapshots); over 4× → close. Critical (welcome, roster, error, pong) always go.
    */
-  function send(socket, data, { critical = false } = {}) {
+  function send(socket, data, { critical = false, unreliable = false } = {}) {
     if (socket.readyState !== socket.OPEN) return false;
+    const state = socket.state;
     const queued = socket.bufferedAmount;
     if (queued > config.slowClientBytes * 4) {
-      log.warn('slow client terminated', { id: socket.state.id, buffered: queued });
+      log.warn('slow client terminated', { id: state.id, buffered: queued });
       socket.close(CLOSE.SLOW_CLIENT, 'too slow');
       setTimeout(() => socket.terminate(), 1000).unref();
       return false;
     }
     if (!critical && queued > config.slowClientBytes) {
-      socket.state.dropped++;
+      state.dropped++;
       stats.dropped++;
       return false;
     }
-    socket.send(data);
+    if (unreliable && dropped(state)) return false;
+    const bytes = typeof data === 'string' ? Buffer.byteLength(data) : data.byteLength;
+    const deliver = () => {
+      if (socket.readyState !== socket.OPEN) return;
+      socket.send(data);
+      state.bytesOut += bytes;
+      stats.bytesOut += bytes;
+    };
+    const delay = netDelay(state, 'outAt');
+    if (delay > 0) setTimeout(deliver, delay);
+    else deliver();
     return true;
   }
 
@@ -52,7 +77,7 @@ export function attachWebSockets(wss, { rooms, config, stats }) {
     for (const s of socketsByRoom.get(roomId) ?? []) send(s, data, opts);
   }
 
-  // The room's own events drive the broadcasts: ws.js never decides WHAT happened, the Room does.
+  // ---------- room events → broadcasts ----------
   function wireRoom(room) {
     const sendRoster = () =>
       broadcast(room.id, encode('roster', { players: room.roster() }), { critical: true });
@@ -77,6 +102,28 @@ export function attachWebSockets(wss, { rooms, config, stats }) {
   rooms.on('roomCreated', wireRoom);
   rooms.on('roomDeleted', (room) => socketsByRoom.delete(room.id));
 
+  // ---------- match snapshots → every client in the room, in its codec, with its own ack ----------
+  function wireMatch(match) {
+    match.on('snapshot', (snap) => {
+      const sockets = socketsByRoom.get(match.roomId);
+      if (!sockets?.size) return;
+      // Binary: encode once, then patch the 4-byte ack (offset 6) per client.
+      let binary = null;
+      for (const socket of sockets) {
+        const ack = match.ackFor(socket.state.id);
+        let data;
+        if (socket.state.codec === 'binary') {
+          binary ??= binaryCodec.encodeSnapshot({ ...snap, ack: 0 });
+          data = binary.slice();
+          new DataView(data.buffer).setUint32(6, ack, true);
+        } else {
+          data = jsonCodec.encodeSnapshot({ ...snap, ack });
+        }
+        send(socket, data, { unreliable: true });
+      }
+    });
+  }
+
   // ---------- connections ----------
   wss.on('connection', (socket, req) => {
     const state = {
@@ -84,9 +131,18 @@ export function attachWebSockets(wss, { rooms, config, stats }) {
       ip: req.socket.remoteAddress,
       player: null,
       roomId: null,
+      codec: 'json',
+      netsim: { lagMs: 0, jitterMs: 0, dropPct: 0 },
+      outAt: 0,
+      inAt: 0,
+      bytesIn: 0,
+      bytesOut: 0,
+      connectedAt: Date.now(),
       missedPongs: 0,
       dropped: 0,
       bucket: new TokenBucket({ ratePerSec: config.rateLimitPerSec, burst: config.rateLimitBurst }),
+      // Inputs come 30/s by design: their own, larger bucket.
+      inputBucket: new TokenBucket({ ratePerSec: TICK_RATE * 2, burst: TICK_RATE * 3 }),
     };
     socket.state = state;
     stats.connections++;
@@ -109,11 +165,13 @@ export function attachWebSockets(wss, { rooms, config, stats }) {
       state.missedPongs = 0;
     });
 
-    socket.on('message', (data, isBinary) => {
-      if (!state.bucket.take()) return reject(CLOSE.POLICY, 'rate limit exceeded');
+    function handle(data, isBinary) {
+      if (socket.readyState !== socket.OPEN) return;
       const parsed = parseClientMessage(data, isBinary);
       if (!parsed.ok) return reject(parsed.code, parsed.reason);
       const msg = parsed.msg;
+      const bucket = msg.type === 'inputs' ? state.inputBucket : state.bucket;
+      if (!bucket.take()) return reject(CLOSE.POLICY, 'rate limit exceeded');
 
       if (!state.player) {
         if (msg.type !== 'join') return reject(CLOSE.BAD_MESSAGE, 'first message must be join');
@@ -123,17 +181,37 @@ export function attachWebSockets(wss, { rooms, config, stats }) {
         clearTimeout(joinTimer);
         state.player = { id: state.id, name: msg.name, joinedAt: Date.now() };
         state.roomId = room.id;
+        state.codec = msg.codec;
         roomSockets(room.id).add(socket);
-        send(socket, encode('welcome', { playerId: state.id, room: room.toJSON() }), {
-          critical: true,
+        send(
+          socket,
+          encode('welcome', { playerId: state.id, room: room.toJSON(), tickRate: TICK_RATE }),
+          { critical: true },
+        );
+        room.join(state.player); // → match spawns our ship → roster (with shipId) to everyone
+        log.info('player joined', {
+          id: state.id,
+          name: msg.name,
+          room: room.id,
+          codec: state.codec,
         });
-        room.join(state.player); // → 'join' → roster + system broadcast (including to us)
-        log.info('player joined', { id: state.id, name: msg.name, room: room.id });
         return;
       }
 
       const room = rooms.get(state.roomId);
       switch (msg.type) {
+        case 'inputs':
+          matches.get(state.roomId)?.pushInputs(state.id, msg.inputs);
+          break;
+        case 'ping':
+          send(socket, encode('pong', { t: msg.t, tick: matches.get(state.roomId)?.tick ?? 0 }), {
+            critical: true,
+          });
+          break;
+        case 'netsim':
+          state.netsim = { lagMs: msg.lagMs, jitterMs: msg.jitterMs, dropPct: msg.dropPct };
+          log.info('netsim', { id: state.id, ...state.netsim });
+          break;
         case 'chat':
           room?.chat(state.id, msg.text);
           break;
@@ -144,6 +222,16 @@ export function attachWebSockets(wss, { rooms, config, stats }) {
           reject(CLOSE.BAD_MESSAGE, 'already joined');
           break;
       }
+    }
+
+    socket.on('message', (data, isBinary) => {
+      state.bytesIn += data.length;
+      stats.bytesIn += data.length;
+      const isInput = isBinary || (data.length < 600 && data.includes('"inputs"'));
+      if (isInput && dropped(state)) return; // simulated packet loss (inputs only)
+      const delay = netDelay(state, 'inAt');
+      if (delay > 0) setTimeout(() => handle(data, isBinary), delay);
+      else handle(data, isBinary);
     });
 
     socket.on('close', (code) => {
@@ -176,6 +264,23 @@ export function attachWebSockets(wss, { rooms, config, stats }) {
   heartbeat.unref();
 
   return {
+    wireMatch,
+
+    connectionStats() {
+      return [...wss.clients].map((s) => {
+        const secs = Math.max(1, (Date.now() - s.state.connectedAt) / 1000);
+        return {
+          id: s.state.id,
+          room: s.state.roomId,
+          codec: s.state.codec,
+          netsim: s.state.netsim,
+          kbInPerS: +(s.state.bytesIn / 1024 / secs).toFixed(2),
+          kbOutPerS: +(s.state.bytesOut / 1024 / secs).toFixed(2),
+          dropped: s.state.dropped,
+        };
+      });
+    },
+
     /** Graceful shutdown: tell every client we're going away (1001). Resolves when all closed. */
     closeAll() {
       clearInterval(heartbeat);

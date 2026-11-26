@@ -1,4 +1,4 @@
-import { PICKUP_TYPES } from '../sim/pickup.js';
+import { PICKUP_TYPES } from '@flyordie/shared/sim/pickup.js';
 
 export function lerpAngle(a, b, t) {
   let diff = b - a;

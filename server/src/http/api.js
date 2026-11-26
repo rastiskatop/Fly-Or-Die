@@ -19,6 +19,7 @@ export function createApiHandler(ctx) {
     ['GET', /^\/health$/, health],
     ['GET', /^\/api\/rooms$/, listRooms],
     ['POST', /^\/api\/rooms$/, createRoom],
+    ['GET', /^\/api\/stats$/, netStats],
     ['GET', /^\/api\/replays$/, replays],
     ['GET', /^\/api\/replays\/([^/]+)$/, streamReplay],
   ];
@@ -74,6 +75,11 @@ export function createApiHandler(ctx) {
       rssMB: +(mem.rss / 2 ** 20).toFixed(1),
       heapUsedMB: +(mem.heapUsed / 2 ** 20).toFixed(1),
     });
+  }
+
+  /** Lab 5: tick duration/jitter per match + bytes/s per connection. */
+  function netStats(req, res) {
+    sendJson(res, 200, { ...ctx.netStats(), totals: ctx.stats });
   }
 
   function listRooms(req, res) {

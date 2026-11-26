@@ -15,7 +15,10 @@ test('protocol: valid join and chat are accepted and cleaned', () => {
   const join = parseClientMessage(
     raw({ v: 1, type: 'join', room: 'eu-1', name: '  Ace  ', extra: 1 }),
   );
-  assert.deepEqual(join, { ok: true, msg: { type: 'join', room: 'eu-1', name: 'Ace' } });
+  assert.deepEqual(join, {
+    ok: true,
+    msg: { type: 'join', room: 'eu-1', name: 'Ace', codec: 'json' },
+  });
   const chat = parseClientMessage(raw({ v: 1, type: 'chat', text: 'привіт' }));
   assert.deepEqual(chat, { ok: true, msg: { type: 'chat', text: 'привіт' } });
 });

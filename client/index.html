@@ -365,6 +365,11 @@
       <div id="chat-status"></div>
     </aside>
 
+    <!-- Bare imports of the shared workspace package. Vite resolves them itself (and bundles them in the
+         build); a plain static server (VS Code Live Server) uses this import map instead. -->
+    <script type="importmap">
+      { "imports": { "@flyordie/shared/": "../shared/src/" } }
+    </script>
     <!-- relative path: works on Vite, on any static server and under a sub-path -->
     <script type="module" src="./src/main.js"></script>
   </body>

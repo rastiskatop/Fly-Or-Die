@@ -7,7 +7,14 @@ import { Vector2 } from './vector.js';
 export class Entity {
   // Private static counter: nobody outside the class can reset or read it.
   static #nextId = 1;
-  #id = Entity.#nextId++;
+  // Ids travel as Uint16 in the binary protocol → wrap at 65535 (old ids are long gone by then).
+  #id = Entity.#allocId();
+
+  static #allocId() {
+    const id = Entity.#nextId;
+    Entity.#nextId = id >= 0xffff ? 1 : id + 1;
+    return id;
+  }
 
   constructor({ kind, x = 0, y = 0, vx = 0, vy = 0, angle = 0, radius = 10 }) {
     this.kind = kind;

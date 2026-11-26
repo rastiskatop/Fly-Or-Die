@@ -86,7 +86,7 @@ export class Room extends EventEmitter {
   }
 
   roster() {
-    return [...this.players.values()].map(({ id, name }) => ({ id, name }));
+    return [...this.players.values()].map(({ id, name, shipId }) => ({ id, name, shipId }));
   }
 
   toJSON() {

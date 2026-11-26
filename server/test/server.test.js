@@ -142,6 +142,33 @@ test('rate limit: a flood closes the socket with 1008', async () => {
   assert.equal(await spam.ws.closed, 1008);
 });
 
+test('binary netcode: inputs up, snapshots down with this client ack', async () => {
+  const { encodeInputs, decodeSnapshot } = await import('@flyordie/shared/net/codec-binary.js');
+  const ws = new WebSocket(wsUrl);
+  const snaps = [];
+  let welcome;
+  ws.on('message', (data, isBinary) => {
+    if (isBinary) snaps.push(decodeSnapshot(data));
+    else if (JSON.parse(data).type === 'welcome') welcome = JSON.parse(data);
+  });
+  await once(ws, 'open');
+  ws.send(JSON.stringify({ v: 1, type: 'join', room: 'us-1', name: 'Bin', codec: 'binary' }));
+  for (let seq = 1; seq <= 10; seq++) {
+    ws.send(encodeInputs([{ seq, buttons: 4 }])); // thrust
+    await new Promise((r) => setTimeout(r, 34));
+  }
+  await new Promise((r) => setTimeout(r, 300));
+  assert.ok(welcome?.tickRate === 30);
+  assert.ok(snaps.length >= 10, `got ${snaps.length} snapshots`);
+  const last = snaps.at(-1);
+  assert.equal(last.ack, 10); // every input applied exactly once, in order
+  assert.ok(snaps.every((s, i) => i === 0 || s.tick > snaps[i - 1].tick));
+  assert.ok(last.entities.some((e) => e.kind === 'ship'));
+  ws.send(Buffer.from([1, 1, 0])); // malformed binary inputs
+  const [code] = await once(ws, 'close');
+  assert.equal(code, 4000);
+});
+
 test('a finished match is in the log directory and streams back from /api/replays', async () => {
   const files = (await readdir(logDir)).filter((f) => f.startsWith('eu-1-'));
   assert.ok(files.length >= 1, 'eu-1 match log exists');

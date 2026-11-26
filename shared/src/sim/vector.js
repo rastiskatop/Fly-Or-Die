@@ -1,3 +1,5 @@
+import { dsin, dcos, datan2 } from './dmath.js';
+
 // Immutable-by-default 2D vector.
 // Pure methods (add, sub, scale, ...) always return a NEW Vector2 and never touch `this`.
 // The *InPlace variants exist for hot paths (entity integration runs every step for every entity).
@@ -8,7 +10,7 @@ export class Vector2 {
   }
 
   static fromAngle(angle, length = 1) {
-    return new Vector2(Math.cos(angle) * length, Math.sin(angle) * length);
+    return new Vector2(dcos(angle) * length, dsin(angle) * length);
   }
 
   static zero() {
@@ -49,13 +51,13 @@ export class Vector2 {
   }
 
   rotate(angle) {
-    const c = Math.cos(angle);
-    const s = Math.sin(angle);
+    const c = dcos(angle);
+    const s = dsin(angle);
     return new Vector2(this.x * c - this.y * s, this.x * s + this.y * c);
   }
 
   angle() {
-    return Math.atan2(this.y, this.x);
+    return datan2(this.y, this.x);
   }
 
   // --- in-place variants (mutate and return `this` for chaining) ---

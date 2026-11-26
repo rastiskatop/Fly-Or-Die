@@ -1,8 +1,36 @@
 {
   "rooms": [
-    { "id": "eu-1", "name": "Kyiv Dogfight", "arena": "classic", "players": 3, "maxPlayers": 8, "region": "eu" },
-    { "id": "eu-2", "name": "Asteroid Belt", "arena": "rocks", "players": 6, "maxPlayers": 8, "region": "eu" },
-    { "id": "us-1", "name": "Calm Skies (training)", "arena": "calm", "players": 0, "maxPlayers": 4, "region": "us" },
-    { "id": "eu-3", "name": "Full House", "arena": "classic", "players": 8, "maxPlayers": 8, "region": "eu" }
+    {
+      "id": "eu-1",
+      "name": "Kyiv Dogfight",
+      "arena": "classic",
+      "players": 3,
+      "maxPlayers": 8,
+      "region": "eu"
+    },
+    {
+      "id": "eu-2",
+      "name": "Asteroid Belt",
+      "arena": "rocks",
+      "players": 6,
+      "maxPlayers": 8,
+      "region": "eu"
+    },
+    {
+      "id": "us-1",
+      "name": "Calm Skies (training)",
+      "arena": "calm",
+      "players": 0,
+      "maxPlayers": 4,
+      "region": "us"
+    },
+    {
+      "id": "eu-3",
+      "name": "Full House",
+      "arena": "classic",
+      "players": 8,
+      "maxPlayers": 8,
+      "region": "eu"
+    }
   ]
 }

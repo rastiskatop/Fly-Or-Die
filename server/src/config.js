@@ -36,6 +36,8 @@ export function loadConfig() {
     host: str('HOST', '127.0.0.1'),
     staticDir: resolve(here, '..', str('STATIC_DIR', '../client/dist')),
     logDir: resolve(here, '..', str('LOG_DIR', 'logs')),
+    // Arena rules (seed, asteroid density, …) — the same JSON files the client loads.
+    arenaDir: resolve(here, '..', str('ARENA_DIR', '../client/public/assets/arenas')),
 
     maxRooms: int('MAX_ROOMS', 20, { min: 1, max: 1000 }),
     maxPlayersPerRoom: int('MAX_PLAYERS_PER_ROOM', 8, { min: 1, max: 64 }),

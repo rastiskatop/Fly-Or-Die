@@ -1,8 +1,21 @@
+# FlyOrDie — real-time multiplayer air combat in the browser
+
+![two clients dogfighting through an authoritative server at 100 ms ±30 ms latency, 2% packet loss](docs/lab-05/duel.gif)
+
+_Two independent clients (left: Red, right: Blue) on one authoritative Node server, both with 100 ms ±30 ms injected latency and 2% loss. Each client predicts its own plane, interpolates the other one ~100 ms in the past, and talks a binary `DataView` protocol at 30 Hz. The overlay is the netgraph._
+
+**Quick start:** `npm install`, then `npm run dev`, then open http://localhost:5173 in two windows and join the same battlefield. Or run `npm start` and open http://localhost:8787. Tests: `npm test` (26).
+
+> **Windows PowerShell:** if `npm` fails with *"running scripts is disabled on this system"* (`npm.ps1` is blocked by the default execution policy), run `npm.cmd run dev` / `npm.cmd start` instead, or allow local scripts once with `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+
+---
+
 FlyOrDie (Lab 1)
 
 A top-down 2D arena game built with vanilla JavaScript, featuring a fixed-timestep simulation and interpolated rendering.
 
 Lab 1 Deliverables
+
 - **Fixed-timestep loop:** Physics runs strictly at 60 UPS.
 - **Interpolated rendering:** Visuals scale to monitor refresh rate (e.g., 60/120/144 FPS) using alpha lerping.
 - **Input closure:** Keyboard state is managed via a private `Set` closure, avoiding global variables.
@@ -11,16 +24,19 @@ Lab 1 Deliverables
 M4 Experiments & Measurements
 
 1. The 100ms Busy-Wait
-* **What happens:** The game stutters heavily. As measured in the HUD, the frame time spikes to ~97.40ms, and the render rate drops to 10 FPS, while the physics steps attempt to catch up (60 UPS) once the freeze ends.
-* **Why:** JavaScript is single-threaded. The `while (performance.now() < t + 100)` block completely occupies the call stack. The event loop cannot process microtasks or trigger `requestAnimationFrame` for rendering until this synchronous loop finishes.
+
+- **What happens:** The game stutters heavily. As measured in the HUD, the frame time spikes to ~97.40ms, and the render rate drops to 10 FPS, while the physics steps attempt to catch up (60 UPS) once the freeze ends.
+- **Why:** JavaScript is single-threaded. The `while (performance.now() < t + 100)` block completely occupies the call stack. The event loop cannot process microtasks or trigger `requestAnimationFrame` for rendering until this synchronous loop finishes.
 
 2. setInterval(frame, 16) vs requestAnimationFrame
-* **What happens:** The render rate jitters (e.g., 63 FPS with ~15.60ms frame times) instead of locking to the monitor's native refresh rate. When switching to a background tab, `setInterval` continues to run in the background, whereas `requestAnimationFrame` pauses completely.
-* **Why:** `setInterval` relies on the task queue and timer drift, ignoring the display's actual vsync. `requestAnimationFrame` is specifically designed to run right before the browser's paint step, ensuring smooth, tear-free animation and saving resources when the tab is inactive.
+
+- **What happens:** The render rate jitters (e.g., 63 FPS with ~15.60ms frame times) instead of locking to the monitor's native refresh rate. When switching to a background tab, `setInterval` continues to run in the background, whereas `requestAnimationFrame` pauses completely.
+- **Why:** `setInterval` relies on the task queue and timer drift, ignoring the display's actual vsync. `requestAnimationFrame` is specifically designed to run right before the browser's paint step, ensuring smooth, tear-free animation and saving resources when the tab is inactive.
 
 3. Variable Timestep + CPU Throttling
-* **What happens:** Removing the accumulator and passing a varying `dt` directly into `simulate(dt)` breaks the fixed physics steps (dropping `steps/s` tracking to 0 while the game renders at 144 FPS / 7.00ms frame time). Under 6x CPU throttling, the ship's final position after 5 seconds of thrust differs significantly from its position under normal CPU loads.
-* **Why:** Floating-point physics integration (Euler integration) is highly sensitive to step size. Large `dt` values (caused by throttling) compound mathematical errors differently than small `dt` values. Restoring the fixed-timestep (accumulator) ensures determinism: the physics engine always takes exact 1/60s steps, so identical inputs always produce identical final positions, regardless of the client's hardware speed.
+
+- **What happens:** Removing the accumulator and passing a varying `dt` directly into `simulate(dt)` breaks the fixed physics steps (dropping `steps/s` tracking to 0 while the game renders at 144 FPS / 7.00ms frame time). Under 6x CPU throttling, the ship's final position after 5 seconds of thrust differs significantly from its position under normal CPU loads.
+- **Why:** Floating-point physics integration (Euler integration) is highly sensitive to step size. Large `dt` values (caused by throttling) compound mathematical errors differently than small `dt` values. Restoring the fixed-timestep (accumulator) ensures determinism: the physics engine always takes exact 1/60s steps, so identical inputs always produce identical final positions, regardless of the client's hardware speed.
 
 ---
 
@@ -29,6 +45,7 @@ FlyOrDie (Лабораторна 1)
 2D-арена з виглядом зверху, створена на чистому JavaScript, із симуляцією з фіксованим кроком та інтерпольованим рендерингом.
 
 Результати Лабораторної 1
+
 - **Цикл із фіксованим кроком:** Фізика працює строго при 60 UPS.
 - **Інтерпольований рендеринг:** Візуальна частина підлаштовується під частоту оновлення монітора за допомогою alpha-інтерполяції.
 - **Замикання для інпуту:** Стан клавіатури керується через приватне замикання `Set`, уникаючи глобальних змінних.
@@ -37,17 +54,19 @@ FlyOrDie (Лабораторна 1)
 Експерименти та вимірювання M4
 
 1. 100-мілісекундне зависання (Busy-Wait)
-* **Що відбувається:** Гра сильно зависає. За даними HUD, час кадру підскакує до ~97.40ms, а частота кадрів падає до 10 FPS, тоді як фізика (60 UPS) намагається надолужити згаяне після розморозки.
-* **Чому:** JavaScript є однопотоковим. Блок `while (performance.now() < t + 100)` повністю займає call stack. Event loop не може обробити мікрозадачі або викликати `requestAnimationFrame`, поки цей синхронний цикл не завершиться.
+
+- **Що відбувається:** Гра сильно зависає. За даними HUD, час кадру підскакує до ~97.40ms, а частота кадрів падає до 10 FPS, тоді як фізика (60 UPS) намагається надолужити згаяне після розморозки.
+- **Чому:** JavaScript є однопотоковим. Блок `while (performance.now() < t + 100)` повністю займає call stack. Event loop не може обробити мікрозадачі або викликати `requestAnimationFrame`, поки цей синхронний цикл не завершиться.
 
 2. setInterval(frame, 16) vs requestAnimationFrame
-* **Що відбувається:** Частота кадрів стрибає (наприклад, 63 FPS із часом кадру ~15.60ms) замість того, щоб зафіксуватися на 144 Гц монітора. На фоновій вкладці `setInterval` продовжує працювати, тоді як `requestAnimationFrame` ставиться на повну паузу.
-* **Чому:** `setInterval` покладається на чергу задач і має зміщення таймера, ігноруючи реальний vsync. `requestAnimationFrame` спеціально розроблений для запуску перед кроком paint браузера, забезпечуючи плавну анімацію без розривів.
+
+- **Що відбувається:** Частота кадрів стрибає (наприклад, 63 FPS із часом кадру ~15.60ms) замість того, щоб зафіксуватися на 144 Гц монітора. На фоновій вкладці `setInterval` продовжує працювати, тоді як `requestAnimationFrame` ставиться на повну паузу.
+- **Чому:** `setInterval` покладається на чергу задач і має зміщення таймера, ігноруючи реальний vsync. `requestAnimationFrame` спеціально розроблений для запуску перед кроком paint браузера, забезпечуючи плавну анімацію без розривів.
 
 3. Змінний крок часу (Variable Timestep) + Тротлінг CPU
-* **Що відбувається:** Видалення акумулятора ламає фіксовані кроки (лічильник `steps/s` падає до 0, хоча гра малює 144 FPS). При штучному уповільненні CPU у 6 разів кінцева позиція корабля після 5 секунд прискорення суттєво відрізняється від позиції без лагів.
-* **Чому:** Фізична інтеграція (інтегрування Ейлера) дуже чутлива до розміру кроку. Великі значення `dt` (через тротлінг) накопичують математичні похибки інакше, ніж малі `dt`. Повернення акумулятора гарантує детермінованість: фізика завжди робить точні кроки по 1/60с, тому однакові вхідні дані дають однакову кінцеву позицію незалежно від потужності ПК.
 
+- **Що відбувається:** Видалення акумулятора ламає фіксовані кроки (лічильник `steps/s` падає до 0, хоча гра малює 144 FPS). При штучному уповільненні CPU у 6 разів кінцева позиція корабля після 5 секунд прискорення суттєво відрізняється від позиції без лагів.
+- **Чому:** Фізична інтеграція (інтегрування Ейлера) дуже чутлива до розміру кроку. Великі значення `dt` (через тротлінг) накопичують математичні похибки інакше, ніж малі `dt`. Повернення акумулятора гарантує детермінованість: фізика завжди робить точні кроки по 1/60с, тому однакові вхідні дані дають однакову кінцеву позицію незалежно від потужності ПК.
 
 ---
 
@@ -58,23 +77,23 @@ Lint/format: `npm run lint`, `npm run format` (ESLint flat config + Prettier, ad
 
 ## What was built
 
-| File | What it is |
-|---|---|
-| `src/sim/vector.js` | `Vector2`: pure `add/sub/scale/length/normalize/rotate/dot/fromAngle` (return new vectors) + `*InPlace` variants for the per-step hot path |
-| `src/sim/entity.js` | `class Entity`: `id` (private `#id` from a private static `#nextId` counter), `pos`, `vel`, `angle`, `radius`, `alive`, `kind`, `update(dt)` |
-| `src/sim/ship.js` | `Ship extends Entity` — the Lab 1 ship, now a class. Private `#hp` + `get hp()`, `damage()`, `fire()`, respawn, pickup effects |
+| File                                                            | What it is                                                                                                                                                                                          |
+| --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/sim/vector.js`                                             | `Vector2`: pure `add/sub/scale/length/normalize/rotate/dot/fromAngle` (return new vectors) + `*InPlace` variants for the per-step hot path                                                          |
+| `src/sim/entity.js`                                             | `class Entity`: `id` (private `#id` from a private static `#nextId` counter), `pos`, `vel`, `angle`, `radius`, `alive`, `kind`, `update(dt)`                                                        |
+| `src/sim/ship.js`                                               | `Ship extends Entity` — the Lab 1 ship, now a class. Private `#hp` + `get hp()`, `damage()`, `fire()`, respawn, pickup effects                                                                      |
 | `src/sim/bullet.js`, `asteroid.js`, `explosion.js`, `pickup.js` | `Bullet` (TTL, inherited velocity), `Asteroid` (drifts, bounces off walls and each other, splits 3→2→1), `Explosion` (particles), `Pickup` (stationary) — each `extends Entity`, **one level only** |
-| `src/sim/world.js` | `World`: `#entities: Map<id, Entity>`, `spawn`, deferred `despawn` + sweep, `get`, `[Symbol.iterator]`, `*ofKind`, `step(dt, inputs)`, seeded RNG |
-| `src/sim/collision.js` | `findCollisions(world)` → `[a, b]` pairs. Naive O(n²) circle test, injected into `World` so Lab 7 can swap in a spatial hash |
-| `src/sim/components.js` | `homing(...)` component factory + `homingSystem` |
-| `src/sim/game.js` | Game rules: collision handlers per pair of kinds, asteroid/pickup "director" |
-| `src/experiments/this-bug.js` | Live demo of the `this` bug — open `http://localhost:5173/?demo=this` and look at the console |
+| `src/sim/world.js`                                              | `World`: `#entities: Map<id, Entity>`, `spawn`, deferred `despawn` + sweep, `get`, `[Symbol.iterator]`, `*ofKind`, `step(dt, inputs)`, seeded RNG                                                   |
+| `src/sim/collision.js`                                          | `findCollisions(world)` → `[a, b]` pairs. Naive O(n²) circle test, injected into `World` so Lab 7 can swap in a spatial hash                                                                        |
+| `src/sim/components.js`                                         | `homing(...)` component factory + `homingSystem`                                                                                                                                                    |
+| `src/sim/game.js`                                               | Game rules: collision handlers per pair of kinds, asteroid/pickup "director"                                                                                                                        |
+| `src/experiments/this-bug.js`                                   | Live demo of the `this` bug — open `http://localhost:5173/?demo=this` and look at the console                                                                                                       |
 
 Gameplay: shoot asteroids (big 10, medium 20, small 30 points); they split. Some medium fragments become **seekers** (red glow) and chase you. Ramming costs HP; at 0 HP the plane explodes and respawns after 2 s at a random safe spot with 2 s of spawn protection (blinking). Pickups: **»** plane speed ×2 for 10 s (blue afterburner), **B** bullet speed ×2 for 10 s (longer tracer), **+** instant full HP repair.
 
 ### Design decisions
 
-- **Deferred spawn and despawn.** `despawn(id)` only marks the entity dead; `World.#sweep()` deletes it after all systems ran. Spawns during a step go to a pending list too. Reason: a `Map` iterated with `for…of` *does* visit entries added during the iteration, so a bullet fired in `Ship.update` would have been updated in the same step it was created, and deleting during collision handling would leave later pairs pointing at removed entities.
+- **Deferred spawn and despawn.** `despawn(id)` only marks the entity dead; `World.#sweep()` deletes it after all systems ran. Spawns during a step go to a pending list too. Reason: a `Map` iterated with `for…of` _does_ visit entries added during the iteration, so a bullet fired in `Ship.update` would have been updated in the same step it was created, and deleting during collision handling would leave later pairs pointing at removed entities.
 - **Mutate in place + previous-state copy.** Every entity keeps `prevPos`/`prevAngle`, refreshed by `snapshot()` at the start of each step; the renderer interpolates between them (Lab 1's interpolation, now for all entities).
 - **Fixed arena 1280×720**, canvas scaled with CSS. The simulation no longer depends on `window.innerWidth` (which can even be `0` when the page loads in a hidden tab). In Lab 5 the server and every client must agree on one arena.
 - **Seeded RNG** (`mulberry32`) inside `World` instead of `Math.random()` in the simulation: same seed + same inputs = same game. `Math.random()` is used only for render effects (engine flame flicker).
@@ -92,11 +111,11 @@ gives `TypeError: Cannot read properties of undefined (reading 'destroyed')`. `s
 
 **Reproduce:** open `/?demo=this` — the console shows the error and the three fixes working.
 
-| Fix | Code | Downside |
-|---|---|---|
-| Arrow wrapper | `setTimeout(() => ship.fire(world))` | A new closure at every wiring; you must remember to write it at each call site |
-| `bind` | `setTimeout(ship.fire.bind(ship))` | Returns a new function each time — `removeEventListener(ship.fire.bind(ship))` removes nothing unless you store the bound copy |
-| Class-field arrow | `fire = (world) => { … }` | One closure **per instance** (own property, not on the prototype): 1000 ships = 1000 copies; can't be called via `super.fire()` |
+| Fix               | Code                                 | Downside                                                                                                                        |
+| ----------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| Arrow wrapper     | `setTimeout(() => ship.fire(world))` | A new closure at every wiring; you must remember to write it at each call site                                                  |
+| `bind`            | `setTimeout(ship.fire.bind(ship))`   | Returns a new function each time — `removeEventListener(ship.fire.bind(ship))` removes nothing unless you store the bound copy  |
+| Class-field arrow | `fire = (world) => { … }`            | One closure **per instance** (own property, not on the prototype): 1000 ships = 1000 copies; can't be called via `super.fire()` |
 
 **Chosen fix:** firing is not wired to a callback at all. The keyboard only fills a plain `controls` object, and the ship fires inside the simulation step as `this.fire(world)` — implicit binding, `this` is the ship. That is also what Lab 1's fixed timestep needs: a timer or key event runs outside the step and would make the simulation non-deterministic. Where a callback is unavoidable, the arrow wrapper is used.
 
@@ -104,7 +123,7 @@ gives `TypeError: Cannot read properties of undefined (reading 'destroyed')`. `s
 
 Two features would break a class hierarchy:
 
-1. **Homing** has to be attachable to a *bullet* **or** an *asteroid* (seeker fragments).
+1. **Homing** has to be attachable to a _bullet_ **or** an _asteroid_ (seeker fragments).
 2. **Pickup** is collidable but doesn't move, doesn't shoot, has no HP and isn't a ship.
 
 **What inheritance would have looked like:**
@@ -121,12 +140,12 @@ Entity
     └── Pickup
 ```
 
-The homing logic would exist twice (or move up into `MovingEntity`, so every rock and bullet carries steering it doesn't use). An asteroid can't *become* homing at runtime — the split code would have to pick a different class. "A homing asteroid that also drops as a pickup" would need yet another branch. Every new feature multiplies classes.
+The homing logic would exist twice (or move up into `MovingEntity`, so every rock and bullet carries steering it doesn't use). An asteroid can't _become_ homing at runtime — the split code would have to pick a different class. "A homing asteroid that also drops as a pickup" would need yet another branch. Every new feature multiplies classes.
 
 **What I did instead (component fields + behaviour-as-data):**
 
-- `homing({ targetKinds, turnRate, range })` returns a plain object. Any entity gets the behaviour with `e.homing = homing(...)`. `homingSystem(world, dt)` runs over *every* entity that has the field and steers its velocity. `destroyAsteroid` attaches it to ~30% of medium fragments, so a rock *becomes* a seeker at runtime; a bullet becomes a homing missile with the same one line (`bullet.homing = homing({ targetKinds: ['asteroid'] })`) — the system doesn't care about the class. Zero new classes, one implementation.
-- A pickup is `Entity` + a `pickup: { effect, duration }` component. The collision rule is "*anything* with a `pickup` component that touches a ship is consumed" — it checks the component, not the class, so an asteroid fragment could carry a pickup without touching the collision code.
+- `homing({ targetKinds, turnRate, range })` returns a plain object. Any entity gets the behaviour with `e.homing = homing(...)`. `homingSystem(world, dt)` runs over _every_ entity that has the field and steers its velocity. `destroyAsteroid` attaches it to ~30% of medium fragments, so a rock _becomes_ a seeker at runtime; a bullet becomes a homing missile with the same one line (`bullet.homing = homing({ targetKinds: ['asteroid'] })`) — the system doesn't care about the class. Zero new classes, one implementation.
+- A pickup is `Entity` + a `pickup: { effect, duration }` component. The collision rule is "_anything_ with a `pickup` component that touches a ship is consumed" — it checks the component, not the class, so an asteroid fragment could carry a pickup without touching the collision code.
 - Inheritance is used only where "is-a" is honest and shallow: `Ship extends Entity` (one level) shares `pos`/`vel`/`update`/`snapshot`.
 
 **Why:** components are plain data, so in Lab 5 they go into network snapshots as-is; behaviours can be added and removed at runtime; systems (homing, collisions) can be swapped or profiled independently (Lab 7). The cost: an entity's abilities are no longer visible from its class name — you have to look at which fields it has — and systems use `if (e.homing)` checks instead of method dispatch.
@@ -148,8 +167,6 @@ The homing logic would exist twice (or move up into `MovingEntity`, so every roc
 
 **Композиція:** самонаведення — компонент `homing(...)`, який можна причепити і до кулі, і до астероїда (уламки-«шукачі»), а `homingSystem` обробляє всіх, хто його має. Пікап — `Entity` + компонент `pickup`; правило колізії перевіряє наявність компонента, а не клас. Ієрархія `Entity → MovingEntity → HomingBullet / HomingAsteroid` дублювала б код і не дозволяла б змінювати поведінку під час гри.
 
-
-
 ---
 
 # FlyOrDie (Lab 3) — Promises, `async`/`await`, loading screen, lobby, sound
@@ -164,12 +181,12 @@ Controls in a match: **W/↑** thrust, **A/D ←/→** turn, **Space** fire, **M
 
 ## How to run (Lab 3 version — see Lab 4 below for the current layout)
 
-| Way | Command / action | Notes |
-|---|---|---|
-| Terminal (Vite) | `npm install`, then `npm run dev` → http://localhost:5173 | Full dev mode: live rooms list, `?fail=` / `?slow=` test flags |
-| VS Code **Live Server** | open `index.html` → **Go Live** | Works the same; test flags are ignored (no test endpoints) |
-| Any static server | e.g. `npx serve .` in the project folder | Same as Live Server |
-| Production build | `npm run build`, then `npm run preview` | `dist/` works from any sub-path (`base: './'`), e.g. GitHub Pages |
+| Way                     | Command / action                                          | Notes                                                             |
+| ----------------------- | --------------------------------------------------------- | ----------------------------------------------------------------- |
+| Terminal (Vite)         | `npm install`, then `npm run dev` → http://localhost:5173 | Full dev mode: live rooms list, `?fail=` / `?slow=` test flags    |
+| VS Code **Live Server** | open `index.html` → **Go Live**                           | Works the same; test flags are ignored (no test endpoints)        |
+| Any static server       | e.g. `npx serve .` in the project folder                  | Same as Live Server                                               |
+| Production build        | `npm run build`, then `npm run preview`                   | `dist/` works from any sub-path (`base: './'`), e.g. GitHub Pages |
 
 Opening `index.html` by double-click (`file://`) does **not** work: browsers block ES modules and `fetch` on `file://`. Any of the ways above does.
 
@@ -177,20 +194,20 @@ Why it works everywhere: Vite serves `public/` at the site root, a plain static 
 
 ## What was built
 
-| File | What it does |
-|---|---|
-| `public/assets/manifest.json` | Lists the sprite atlas, the sprite sheet, 7 sounds and 3 arena definitions |
-| `src/assets/net.js` | `fetchChecked` / `fetchJson` (throw on `!res.ok`), `withRetry` (exponential backoff + jitter, never retries 4xx / bad JSON / user abort), abortable `sleep`, `createLimiter` |
-| `src/assets/loader.js` | `loadImage`, `loadAudio(ctx, url)`, `loadJson` — each takes an `AbortSignal` and has a per-request `AbortSignal.timeout`; `loadAll(manifest, { onProgress, signal })` — `Promise.all` with per-item progress |
-| `src/screens/loading-screen.js` | Canvas loading screen with a real progress bar; **Esc** aborts; on failure "click or R to retry" (a promise made from a single user event) |
-| `src/render/sprites.js` + `public/assets/sprites/sheet.{svg,json}` | Sprite sheet + atlas; `drawImage` with source rectangles. Plane has idle / 2-frame thrust / 2-frame afterburner / hit frames |
-| `src/audio/audio.js` | Owns the `AudioContext`; unlocked by the first click (Join); plays decoded `AudioBuffer`s with stereo pan by x-position |
-| `src/render/hud.js` | Score popups, pickup banners, damage flash — driven by sim events |
-| `src/sim/world.js` | `World extends EventTarget`; the sim emits `fired`, `hit`, `exploded`, `scored`, `pickup`, `respawned` |
-| `src/lobby/lobby.js` | `class Lobby extends EventTarget`: `refresh()`, `start()`/`stop()` polling, `join()`; events `loading` / `rooms` / `error` / `join` |
-| `src/lobby/lobby-view.js` | DOM rendering of the lobby, listens to the `Lobby`'s events |
-| `vite.config.js` | Dev-only test endpoints: `/__delay/<ms>/…`, `/__status/<code>/…`, `/__flaky/<n>/…`, `/__badjson`, and `/api/rooms.json` with drifting player counts |
-| `tools/gen-sprites.mjs`, `tools/gen-sounds.mjs` | Generate the sprite sheet and the WAV sound effects (`npm run gen:assets`) — all art and sound is original |
+| File                                                               | What it does                                                                                                                                                                                                 |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `public/assets/manifest.json`                                      | Lists the sprite atlas, the sprite sheet, 7 sounds and 3 arena definitions                                                                                                                                   |
+| `src/assets/net.js`                                                | `fetchChecked` / `fetchJson` (throw on `!res.ok`), `withRetry` (exponential backoff + jitter, never retries 4xx / bad JSON / user abort), abortable `sleep`, `createLimiter`                                 |
+| `src/assets/loader.js`                                             | `loadImage`, `loadAudio(ctx, url)`, `loadJson` — each takes an `AbortSignal` and has a per-request `AbortSignal.timeout`; `loadAll(manifest, { onProgress, signal })` — `Promise.all` with per-item progress |
+| `src/screens/loading-screen.js`                                    | Canvas loading screen with a real progress bar; **Esc** aborts; on failure "click or R to retry" (a promise made from a single user event)                                                                   |
+| `src/render/sprites.js` + `public/assets/sprites/sheet.{svg,json}` | Sprite sheet + atlas; `drawImage` with source rectangles. Plane has idle / 2-frame thrust / 2-frame afterburner / hit frames                                                                                 |
+| `src/audio/audio.js`                                               | Owns the `AudioContext`; unlocked by the first click (Join); plays decoded `AudioBuffer`s with stereo pan by x-position                                                                                      |
+| `src/render/hud.js`                                                | Score popups, pickup banners, damage flash — driven by sim events                                                                                                                                            |
+| `src/sim/world.js`                                                 | `World extends EventTarget`; the sim emits `fired`, `hit`, `exploded`, `scored`, `pickup`, `respawned`                                                                                                       |
+| `src/lobby/lobby.js`                                               | `class Lobby extends EventTarget`: `refresh()`, `start()`/`stop()` polling, `join()`; events `loading` / `rooms` / `error` / `join`                                                                          |
+| `src/lobby/lobby-view.js`                                          | DOM rendering of the lobby, listens to the `Lobby`'s events                                                                                                                                                  |
+| `vite.config.js`                                                   | Dev-only test endpoints: `/__delay/<ms>/…`, `/__status/<code>/…`, `/__flaky/<n>/…`, `/__badjson`, and `/api/rooms.json` with drifting player counts                                                          |
+| `tools/gen-sprites.mjs`, `tools/gen-sounds.mjs`                    | Generate the sprite sheet and the WAV sound effects (`npm run gen:assets`) — all art and sound is original                                                                                                   |
 
 ### Decoupling: the sim never imports audio or HUD
 
@@ -209,26 +226,26 @@ If the sheet or atlas fails to load, `drawWorld` falls back to the Lab 2 vector 
 
 ### Debug URL flags (dev server)
 
-| Flag | Effect |
-|---|---|
-| `?slow=300` | every asset request delayed by 300 ms |
-| `?seq=1` | sequential `await` instead of `Promise.all` |
-| `?fail=404` | sprite sheet → missing file |
-| `?fail=timeout` | one sound hangs 8 s |
-| `?fail=flaky` | one sound answers 503 twice, then 200 |
-| `?fail=badjson` | an arena file is truncated JSON |
-| `?fail=manifest` | manifest answers 503 three times |
-| `?fail=lobby` | rooms request hangs 6 s |
-| `?demo=puzzles` | runs the 5 ordering puzzles and prints a table |
+| Flag             | Effect                                         |
+| ---------------- | ---------------------------------------------- |
+| `?slow=300`      | every asset request delayed by 300 ms          |
+| `?seq=1`         | sequential `await` instead of `Promise.all`    |
+| `?fail=404`      | sprite sheet → missing file                    |
+| `?fail=timeout`  | one sound hangs 8 s                            |
+| `?fail=flaky`    | one sound answers 503 twice, then 200          |
+| `?fail=badjson`  | an arena file is truncated JSON                |
+| `?fail=manifest` | manifest answers 503 three times               |
+| `?fail=lobby`    | rooms request hangs 6 s                        |
+| `?demo=puzzles`  | runs the 5 ordering puzzles and prints a table |
 
 ## Sequential vs concurrent loading (12 assets)
 
 Measured with `[assets] … in N ms` from the console (Chrome, Vite dev server):
 
-| Network | `Promise.all` (concurrent) | sequential `await` | Speed-up |
-|---|---|---|---|
-| local, no delay | 33 ms | 64 ms | 1.9× |
-| `?slow=300` (300 ms per request) | **638 ms** | **3739 ms** | **5.9×** |
+| Network                          | `Promise.all` (concurrent) | sequential `await` | Speed-up |
+| -------------------------------- | -------------------------- | ------------------ | -------- |
+| local, no delay                  | 33 ms                      | 64 ms              | 1.9×     |
+| `?slow=300` (300 ms per request) | **638 ms**                 | **3739 ms**        | **5.9×** |
 
 Sequential: 12 × ~300 ms. Concurrent: two waves of 6 (see the limiter below) ≈ 2 × 300 ms.
 
@@ -236,16 +253,16 @@ Sequential: 12 × ~300 ms. Concurrent: two waves of 6 (see the limiter below) �
 
 Each failure is recovered: either the game still starts with a fallback, or the user gets a clear retry prompt.
 
-| # | Failure | How it's handled | Evidence |
-|---|---|---|---|
-| 1 | **404 sprite sheet** (`?fail=404`) | 4xx is not retried; recorded as a failure; the game uses vector graphics | ![](docs/lab-03/01-loading-404-timeout-badjson.jpg) ![](docs/lab-03/03-vector-fallback-after-404.jpg) |
-| 2 | **Network timeout** (`?fail=timeout`) | `AbortSignal.timeout(2500)` → `TimeoutError` → retried twice with backoff → skipped; that sound is silent | log below |
-| 3 | **503, then OK** (`?fail=flaky`) | transient → retry #1, retry #2 → loaded successfully | log below |
-| 4 | **Corrupt JSON** (`?fail=badjson`) | `SyntaxError` is not retried; the room uses the built-in default arena | ![](docs/lab-03/02-lobby-asset-notices.jpg) |
-| 5 | **Abort mid-load** (Esc with `?slow=1500`) | `AbortController.abort()` → every pending fetch rejects with `AbortError` → "Loading cancelled", click/R to retry | ![](docs/lab-03/04-abort-mid-load.jpg) |
-| 6 | **Critical failure: manifest 503** (`?fail=manifest`) | 3 attempts fail → error screen with retry → the 4th request succeeds | ![](docs/lab-03/05-manifest-503-retry.jpg) |
-| 7 | **Lobby request timeout** (`?fail=lobby`) | error line in the lobby, next poll retries automatically | ![](docs/lab-03/06-lobby-timeout.jpg) |
-| 8 | **Leaving the lobby mid-request** | `lobby.stop()` aborts the in-flight fetch: `[lobby] in-flight request to __delay/4000/api/rooms.json aborted (left the lobby)`, network tab shows `net::ERR_ABORTED` | console |
+| #   | Failure                                               | How it's handled                                                                                                                                                     | Evidence                                                                                              |
+| --- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| 1   | **404 sprite sheet** (`?fail=404`)                    | 4xx is not retried; recorded as a failure; the game uses vector graphics                                                                                             | ![](docs/lab-03/01-loading-404-timeout-badjson.jpg) ![](docs/lab-03/03-vector-fallback-after-404.jpg) |
+| 2   | **Network timeout** (`?fail=timeout`)                 | `AbortSignal.timeout(2500)` → `TimeoutError` → retried twice with backoff → skipped; that sound is silent                                                            | log below                                                                                             |
+| 3   | **503, then OK** (`?fail=flaky`)                      | transient → retry #1, retry #2 → loaded successfully                                                                                                                 | log below                                                                                             |
+| 4   | **Corrupt JSON** (`?fail=badjson`)                    | `SyntaxError` is not retried; the room uses the built-in default arena                                                                                               | ![](docs/lab-03/02-lobby-asset-notices.jpg)                                                           |
+| 5   | **Abort mid-load** (Esc with `?slow=1500`)            | `AbortController.abort()` → every pending fetch rejects with `AbortError` → "Loading cancelled", click/R to retry                                                    | ![](docs/lab-03/04-abort-mid-load.jpg)                                                                |
+| 6   | **Critical failure: manifest 503** (`?fail=manifest`) | 3 attempts fail → error screen with retry → the 4th request succeeds                                                                                                 | ![](docs/lab-03/05-manifest-503-retry.jpg)                                                            |
+| 7   | **Lobby request timeout** (`?fail=lobby`)             | error line in the lobby, next poll retries automatically                                                                                                             | ![](docs/lab-03/06-lobby-timeout.jpg)                                                                 |
+| 8   | **Leaving the lobby mid-request**                     | `lobby.stop()` aborts the in-flight fetch: `[lobby] in-flight request to __delay/4000/api/rooms.json aborted (left the lobby)`, network tab shows `net::ERR_ABORTED` | console                                                                                               |
 
 Console log for `?fail=404,flaky,badjson,timeout`:
 
@@ -264,7 +281,7 @@ Console log for `?fail=404,flaky,badjson,timeout`:
 
 0. **Invisible bullets.** The bullet sprites were horizontal SVG `<line>`s with a glow filter. A horizontal line has a bounding box of height 0, so the filter region (a percentage of the bbox) was 0 too, and the browser drew nothing. Fix: capsule shapes (`<rect>` with height) and a filter with `filterUnits="userSpaceOnUse"`.
 
-1. **The 404 wasn't a 404.** The missing sprite first failed as *"cannot decode"*, not *"HTTP 404"*. Vite's dev server has an SPA fallback: an unknown path returns `index.html` with **200 OK**, so `fetch` fulfilled and `res.ok` was `true` — the HTML then failed to decode as an image. Fix: `appType: 'mpa'` in `vite.config.js` (no fallback). Lesson: `res.ok` only tells you what the server *said*.
+1. **The 404 wasn't a 404.** The missing sprite first failed as _"cannot decode"_, not _"HTTP 404"_. Vite's dev server has an SPA fallback: an unknown path returns `index.html` with **200 OK**, so `fetch` fulfilled and `res.ok` was `true` — the HTML then failed to decode as an image. Fix: `appType: 'mpa'` in `vite.config.js` (no fallback). Lesson: `res.ok` only tells you what the server _said_.
 2. **Timeouts that never reached the network.** With `?slow=1500` (1.5 s per request, timeout 2.5 s) all 12 assets "timed out": `12 failed, 24 retries`. Browsers open only ~6 HTTP/1.1 connections per host. `Promise.all` started 12 fetches; 6 waited in the browser's queue while their `AbortSignal.timeout` was already ticking. Fix: `createLimiter(6)` in `net.js` — a request is handed to `fetch` only when a slot is free, so its timeout starts when it really starts. After the fix: `12 assets in 3053 ms, 0 failed, 0 retries`.
 
 ## Five ordering puzzles
@@ -272,43 +289,82 @@ Console log for `?fail=404,flaky,badjson,timeout`:
 Run with `?demo=puzzles`; every actual order below was checked in Chrome and matches.
 
 **1. `await` yields even for a non-promise**
+
 ```js
-async function f() { log('f1'); await undefined; log('f2'); }
-log('a'); f(); Promise.resolve().then(() => log('p')); log('b');
+async function f() {
+  log('f1');
+  await undefined;
+  log('f2');
+}
+log('a');
+f();
+Promise.resolve().then(() => log('p'));
+log('b');
 ```
+
 Output: `a f1 b f2 p`. The body of `f` runs synchronously until `await`; the rest becomes a microtask queued **before** `p`'s reaction, because `f()` is called first.
 
 **2. `setTimeout` scheduled inside `.then`**
+
 ```js
 setTimeout(() => log('t1'), 0);
-Promise.resolve().then(() => { log('p1'); setTimeout(() => log('t2'), 0); }).then(() => log('p2'));
+Promise.resolve()
+  .then(() => {
+    log('p1');
+    setTimeout(() => log('t2'), 0);
+  })
+  .then(() => log('p2'));
 log('s');
 ```
+
 Output: `s p1 p2 t1 t2`. All microtasks (`p1`, `p2`) drain before any task; `t2` is queued after `t1`, which was already waiting.
 
 **3. Microtasks drain between two `requestAnimationFrame` callbacks**
+
 ```js
-requestAnimationFrame(() => { log('raf1'); queueMicrotask(() => log('m1')); });
+requestAnimationFrame(() => {
+  log('raf1');
+  queueMicrotask(() => log('m1'));
+});
 requestAnimationFrame(() => log('raf2'));
-queueMicrotask(() => log('m0')); log('sync');
+queueMicrotask(() => log('m0'));
+log('sync');
 ```
+
 Output: `sync m0 raf1 m1 raf2`. The microtask checkpoint runs after **each** rAF callback, not after the whole frame, so `m1` comes before `raf2` even though both rAFs belong to the same frame.
 
 **4. An `async` function that returns a promise costs extra ticks**
+
 ```js
-async function g() { return 'g'; }
-async function h() { return Promise.resolve('h'); }
+async function g() {
+  return 'g';
+}
+async function h() {
+  return Promise.resolve('h');
+}
 h().then(log);
-Promise.resolve().then(() => log('x1')).then(() => log('x2')).then(() => log('x3'));
+Promise.resolve()
+  .then(() => log('x1'))
+  .then(() => log('x2'))
+  .then(() => log('x3'));
 g().then(log);
 ```
-Output: `x1 g x2 h x3`. `g`'s promise is already fulfilled, so its reaction runs in the first tick. Returning a promise from `h` makes the async promise *adopt* it: one extra job to call `.then` on it, one more to resolve. That's two extra ticks, so `h` lands after `x2`.
+
+Output: `x1 g x2 h x3`. `g`'s promise is already fulfilled, so its reaction runs in the first tick. Returning a promise from `h` makes the async promise _adopt_ it: one extra job to call `.then` on it, one more to resolve. That's two extra ticks, so `h` lands after `x2`.
 
 **5. A rejection skips `.then`, but still takes a tick**
+
 ```js
-Promise.reject(new Error('boom')).then(() => log('then')).catch((e) => log(`catch:${e.message}`)).finally(() => log('finally'));
-Promise.resolve().then(() => log('ok1')).then(() => log('ok2')).then(() => log('ok3'));
+Promise.reject(new Error('boom'))
+  .then(() => log('then'))
+  .catch((e) => log(`catch:${e.message}`))
+  .finally(() => log('finally'));
+Promise.resolve()
+  .then(() => log('ok1'))
+  .then(() => log('ok2'))
+  .then(() => log('ok3'));
 ```
+
 Output: `ok1 catch:boom ok2 finally ok3`. The skipped `.then` still passes the rejection on as one microtask, so the two chains interleave one step at a time.
 
 ## Reflection answers (short)
@@ -319,7 +375,7 @@ Output: `ok1 catch:boom ok2 finally ok3`. The skipped `.then` still passes the r
 4. **Combinators in this game:** `all` — asset loading (fail fast on a critical asset); `allSettled` — "load what you can" (my `loadAll` gets the same effect by catching per item); `race` — a timeout race (I use `AbortSignal.timeout` instead because `race` doesn't cancel the loser); `any` — the fastest of several mirrors. When `all` rejects, the other promises **keep running** — that's why every loader also gets the `signal`.
 5. **`fetch` and 404:** a 404 is a valid HTTP response, so the promise fulfils with `res.ok === false`; only a network failure rejects. Two steps: headers arrive (`fetch` resolves) → body is read as a stream (`res.json()` is a second promise).
 6. **`AbortController`:** cancellation lives in a separate signal object that you pass in. Whoever does the work listens to `abort` and rejects. My own `sleep(ms, signal)` and `withRetry({ signal })` do exactly that.
-7. **Promise vs event:** a promise is for one value and *remembers* it (a late `.then` still gets it); an event repeats and is *forgotten* if nobody listens. Event → promise: `lobby.nextJoin()` = `new Promise((r) => lobby.addEventListener('join', (e) => r(e.detail), { once: true }))`.
+7. **Promise vs event:** a promise is for one value and _remembers_ it (a late `.then` still gets it); an event repeats and is _forgotten_ if nobody listens. Event → promise: `lobby.nextJoin()` = `new Promise((r) => lobby.addEventListener('join', (e) => r(e.detail), { once: true }))`.
 8. **Unhandled rejection:** in the browser → an `unhandledrejection` event plus a console error, the page lives on (I log it in `main.js`). In Node ≥ 15 → the process crashes with exit code 1. Deliberate: a server must not continue in an unknown state, while a page with one broken promise is usually still usable.
 
 ---
@@ -338,8 +394,6 @@ Output: `ok1 catch:boom ok2 finally ok3`. The skipped `.then` still passes the r
 
 **П’ять головоломок порядку виконання** — вище, всі перевірені в Chrome (`?demo=puzzles`).
 
-
-
 ---
 
 # FlyOrDie (Lab 4) — Node.js server: `EventEmitter`, streams, WebSockets
@@ -356,33 +410,33 @@ scripts/dev.mjs       runs both in one terminal
 docs/                 screenshots, graphs
 ```
 
-| Way | Command | What you get |
-|---|---|---|
-| **Dev (terminal / VS Code terminal)** | `npm install`, then `npm run dev` | server on :8787 + Vite on http://localhost:5173 (proxies `/api`, `/health`, `/ws`) |
-| **Production-like** | `npm start` (builds the client, then starts the server) | one Node process serves the game **and** the API/WebSocket on http://localhost:8787. The link only works while this command is running |
-| **VS Code Live Server** | "Go Live" on the project folder + `npm run dev:server` in a terminal | root `index.html` redirects to `client/`; the client finds the server on :8787 (CORS) |
-| No server running | any of the above without the server | **offline mode**: local game, static room list, no chat |
-| Tests | `npm test` | 14 `node:test` tests (unit + a real server with two WebSocket clients) |
+| Way                                   | Command                                                              | What you get                                                                                                                           |
+| ------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| **Dev (terminal / VS Code terminal)** | `npm install`, then `npm run dev`                                    | server on :8787 + Vite on http://localhost:5173 (proxies `/api`, `/health`, `/ws`)                                                     |
+| **Production-like**                   | `npm start` (builds the client, then starts the server)              | one Node process serves the game **and** the API/WebSocket on http://localhost:8787. The link only works while this command is running |
+| **VS Code Live Server**               | "Go Live" on the project folder + `npm run dev:server` in a terminal | root `index.html` redirects to `client/`; the client finds the server on :8787 (CORS)                                                  |
+| No server running                     | any of the above without the server                                  | **offline mode**: local game, static room list, no chat                                                                                |
+| Tests                                 | `npm test`                                                           | 14 `node:test` tests (unit + a real server with two WebSocket clients)                                                                 |
 
 Config: `server/.env.example` → copy to `server/.env` (optional; loaded with `node --env-file-if-exists=.env`).
 
 ## What was built
 
-| File | What it does |
-|---|---|
-| `server/src/config.js` | every setting from `process.env`, parsed and validated once (bad value → clear error at startup) |
-| `server/src/index.js` | `node:http` server, WebSocket upgrade on `/ws`, match-log wiring, graceful shutdown (`SIGINT`/`SIGTERM`/IPC), last-resort crash handlers |
-| `server/src/http/static.js` | serves `client/dist`: MIME types, `Content-Length`, cache headers (hashed JS immutable), **path-traversal guard**, streamed with `pipeline` |
-| `server/src/http/api.js` | `GET /health`, `GET /api/rooms`, `POST /api/rooms` (body ≤ 1 KB, validated), `GET /api/replays`, `GET /api/replays/:id` (streamed), debug routes |
-| `server/src/rooms.js` | `Room extends EventEmitter` (`join`/`leave`/`chat`/`event`/`matchStart`/`matchEnd`/`empty`), `RoomManager extends EventEmitter` |
-| `server/src/protocol.js` | protocol **v1**: JSON `{ v, type }` messages, `parseClientMessage()` validates every frame, close codes |
-| `server/src/ws.js` | connection lifecycle: join within 5 s, rate limit → validate → dispatch, roster/chat broadcast, heartbeat, slow-client policy, `error` listener on every socket |
-| `server/src/rate-limit.js` | token bucket (10 msg/s, burst 20) |
-| `server/src/log/matchlog.js` | object-mode `Transform` → NDJSON, `pipeline` to `logs/<room>-<time>-<match>.ndjson` |
-| `server/src/log/replay.js` | async generator over an NDJSON file (`createReadStream` + `readline`) |
-| `client/src/net/connection.js` | `Connection extends EventTarget`: dispatch by `type`, **send queue**, **reconnect with backoff + jitter**, no retry on deliberate refusals |
-| `client/src/net/server.js` | finds the server: same origin, else `:8787` — else offline |
-| `client/src/net/chat-view.js` | in-match roster + chat panel (Enter to chat, Esc to close it) |
+| File                           | What it does                                                                                                                                                    |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `server/src/config.js`         | every setting from `process.env`, parsed and validated once (bad value → clear error at startup)                                                                |
+| `server/src/index.js`          | `node:http` server, WebSocket upgrade on `/ws`, match-log wiring, graceful shutdown (`SIGINT`/`SIGTERM`/IPC), last-resort crash handlers                        |
+| `server/src/http/static.js`    | serves `client/dist`: MIME types, `Content-Length`, cache headers (hashed JS immutable), **path-traversal guard**, streamed with `pipeline`                     |
+| `server/src/http/api.js`       | `GET /health`, `GET /api/rooms`, `POST /api/rooms` (body ≤ 1 KB, validated), `GET /api/replays`, `GET /api/replays/:id` (streamed), debug routes                |
+| `server/src/rooms.js`          | `Room extends EventEmitter` (`join`/`leave`/`chat`/`event`/`matchStart`/`matchEnd`/`empty`), `RoomManager extends EventEmitter`                                 |
+| `server/src/protocol.js`       | protocol **v1**: JSON `{ v, type }` messages, `parseClientMessage()` validates every frame, close codes                                                         |
+| `server/src/ws.js`             | connection lifecycle: join within 5 s, rate limit → validate → dispatch, roster/chat broadcast, heartbeat, slow-client policy, `error` listener on every socket |
+| `server/src/rate-limit.js`     | token bucket (10 msg/s, burst 20)                                                                                                                               |
+| `server/src/log/matchlog.js`   | object-mode `Transform` → NDJSON, `pipeline` to `logs/<room>-<time>-<match>.ndjson`                                                                             |
+| `server/src/log/replay.js`     | async generator over an NDJSON file (`createReadStream` + `readline`)                                                                                           |
+| `client/src/net/connection.js` | `Connection extends EventTarget`: dispatch by `type`, **send queue**, **reconnect with backoff + jitter**, no retry on deliberate refusals                      |
+| `client/src/net/server.js`     | finds the server: same origin, else `:8787` — else offline                                                                                                      |
+| `client/src/net/chat-view.js`  | in-match roster + chat panel (Enter to chat, Esc to close it)                                                                                                   |
 
 ### Protocol v1
 
@@ -393,16 +447,16 @@ server → client   welcome { playerId, room }   roster { players }   chat { fro
 
 Every frame is validated on the server: JSON object, `v === 1`, a known `type` (`Object.hasOwn` — `"__proto__"` is not a type), per-type fields (room id `[a-z0-9-]{1,32}`, name 1–16 printable chars, chat 1–200 printable chars). Only the known fields are copied on. A violation closes the socket with a code:
 
-| Code | Meaning |
-|---|---|
-| 1008 | rate limit exceeded |
-| 1009 | frame over `maxPayload` (4 KB) — `ws` closes it itself |
+| Code | Meaning                                                    |
+| ---- | ---------------------------------------------------------- |
+| 1008 | rate limit exceeded                                        |
+| 1009 | frame over `maxPayload` (4 KB) — `ws` closes it itself     |
 | 4000 | not JSON / wrong shape / binary / first message not `join` |
-| 4001 | unknown type |
-| 4002 | unsupported protocol version |
-| 4003 | no `join` within 5 s |
-| 4004 | room not found / full |
-| 4005 | slow client terminated |
+| 4001 | unknown type                                               |
+| 4002 | unsupported protocol version                               |
+| 4003 | no `join` within 5 s                                       |
+| 4004 | room not found / full                                      |
+| 4005 | slow client terminated                                     |
 
 ### Two windows, one room
 
@@ -415,6 +469,7 @@ Also tested across origins: one window from the Node server (`:8787`), one from 
 ### Visual theme (after review)
 
 The green-on-black "terminal" look was replaced with a war theme. All art is original and drawn in code:
+
 - **Menus** (`client/src/render/menu-bg.js`): animated dusk sky over a burning skyline, searchlights, flak bursts, fighters with contrails, and rifles, grenades, cartridges and bombs tumbling through the air. Olive panel with a hazard stripe and a stencil font.
 - **Battlefield** (`client/src/render/battlefield.js`): a top-down map generated once per arena from its seed: fields / desert / snow (`terrain` in the arena JSON), dirt roads with tyre tracks, an airstrip, trenches, craters, sandbag emplacements, trees and a tactical grid. Cloud shadows and plane-shadow formations drift over it. Generation takes ~10 ms, and drawing it costs ~0.06 ms per frame (a pre-rendered offscreen canvas).
 - The plane is now steel-grey with yellow ID markings, so it reads on all three terrains.
@@ -441,7 +496,7 @@ Excerpt of a real log (the server was restarted while two players were in the ro
 {"seq":6,"t":21738,"type":"match_end","room":"eu-1","match":"3136f18b","reason":"empty","players":0}
 ```
 
-**A subtle bug avoided:** `events.on()` must be called *synchronously* when the match starts. The first version subscribed inside the generator (or after `await mkdir`), so the subscription only happened once the stream started reading — `match_start` and the first `join` were already emitted and lost. Now the room emits `matchStart` *before* its first `event`, and `startMatchLog()` subscribes right there, synchronously. `LOG_DIR` is created once at startup.
+**A subtle bug avoided:** `events.on()` must be called _synchronously_ when the match starts. The first version subscribed inside the generator (or after `await mkdir`), so the subscription only happened once the stream started reading — `match_start` and the first `join` were already emitted and lost. Now the room emits `matchStart` _before_ its first `event`, and `startMatchLog()` subscribes right there, synchronously. `LOG_DIR` is created once at startup.
 
 ### Backpressure, measured
 
@@ -449,25 +504,25 @@ Excerpt of a real log (the server was restarted while two players were in the ro
 
 ![server rss over time](docs/lab-04/backpressure.svg)
 
-| Endpoint | Code | Peak server rss |
-|---|---|---|
-| `/api/replays/:id` | `pipeline(createReadStream(file), res)` | **81 MB** (flat 62–74 MB the whole download) |
-| `/api/debug/replays/:id/naive` | `rs.on('data', c => res.write(c))` | **223 MB** (jumps to 172 MB in 0.3 s, stays there) |
+| Endpoint                       | Code                                    | Peak server rss                                    |
+| ------------------------------ | --------------------------------------- | -------------------------------------------------- |
+| `/api/replays/:id`             | `pipeline(createReadStream(file), res)` | **81 MB** (flat 62–74 MB the whole download)       |
+| `/api/debug/replays/:id/naive` | `rs.on('data', c => res.write(c))`      | **223 MB** (jumps to 172 MB in 0.3 s, stays there) |
 
 The naive version reads the file at disk speed. Every `res.write()` returns `false` once the socket buffer is full, but the code ignores that, so the whole 200 MB file ends up queued in the process's memory. `pipeline` pauses the file stream when `write()` returns `false` and resumes it on `'drain'`. Memory is bounded by the buffer sizes, not by the file. The throttled client is a script rather than DevTools throttling, so the run is reproducible; raw data is in `docs/lab-04/backpressure.csv`.
 
 ## M4 — Abuse limits
 
-| Limit | Where | Default |
-|---|---|---|
-| Messages per connection | token bucket in `ws.js` → close 1008 | 10/s, burst 20 |
-| WebSocket frame size | `new WebSocketServer({ maxPayload })` → 1009 | 4 KB |
-| HTTP body size | `readJsonBody` stops reading and answers 413 | 1 KB |
-| Players per room | `Room.full` → 4004 | 8 |
-| Rooms per server | `RoomManager.create` → `POST /api/rooms` answers 503 | 20 |
-| Join deadline | timer per socket → 4003 | 5 s |
-| Dead connections | ping every 15 s, 2 missed pongs → `terminate()` | |
-| **Slow client** | `socket.bufferedAmount` > 256 KB → drop non-critical messages (chat, system); > 1 MB → close 4005. Roster/welcome/error are always sent | 256 KB |
+| Limit                   | Where                                                                                                                                   | Default        |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| Messages per connection | token bucket in `ws.js` → close 1008                                                                                                    | 10/s, burst 20 |
+| WebSocket frame size    | `new WebSocketServer({ maxPayload })` → 1009                                                                                            | 4 KB           |
+| HTTP body size          | `readJsonBody` stops reading and answers 413                                                                                            | 1 KB           |
+| Players per room        | `Room.full` → 4004                                                                                                                      | 8              |
+| Rooms per server        | `RoomManager.create` → `POST /api/rooms` answers 503                                                                                    | 20             |
+| Join deadline           | timer per socket → 4003                                                                                                                 | 5 s            |
+| Dead connections        | ping every 15 s, 2 missed pongs → `terminate()`                                                                                         |                |
+| **Slow client**         | `socket.bufferedAmount` > 256 KB → drop non-critical messages (chat, system); > 1 MB → close 4005. Roster/welcome/error are always sent | 256 KB         |
 
 All of these are covered by `server/test/server.test.js` (except the heartbeat and slow-client timing).
 
@@ -533,7 +588,7 @@ Our server, `node server/scripts/demo-crash.mjs`:
 3. CJS: `require` is synchronous and dynamic, `module.exports`, has `__dirname`. ESM: static `import`/`export` resolved before running, async loading, top-level `await`, strict by default. `import.meta.dirname` replaces `__dirname` (used in `config.js`).
 4. See the write-up and the graph above.
 5. Readable = source, Writable = sink, Duplex = both, independent sides; Transform = a Duplex whose output is computed from its input (`NdjsonEncoder`). A TCP socket is a **Duplex**.
-6. The client sends `GET /ws` with `Upgrade: websocket` + `Sec-WebSocket-Key`; the server answers `101 Switching Protocols` + `Sec-WebSocket-Accept` (SHA-1 of key + GUID); from then on the same TCP connection carries framed messages both ways. Games need the server to *push* many small messages with low overhead. Polling adds a request per update; SSE is server→client only.
+6. The client sends `GET /ws` with `Upgrade: websocket` + `Sec-WebSocket-Key`; the server answers `101 Switching Protocols` + `Sec-WebSocket-Accept` (SHA-1 of key + GUID); from then on the same TCP connection carries framed messages both ways. Games need the server to _push_ many small messages with low overhead. Polling adds a request per update; SSE is server→client only.
 7. See the crash write-up. The promise equivalent is an unhandled rejection.
 8. `bufferedAmount` grows; memory grows with it. Detect it via `bufferedAmount` / `write()` returning `false`. Options: drop non-critical messages, send only the latest snapshot (Lab 5), lower the rate for that client, or disconnect it. We drop, then close.
 9. Because anyone can open a WebSocket to the server from a console or a script. The client is not the only client, and an unchecked field is a crash or an exploit.
@@ -553,3 +608,144 @@ Our server, `node server/scripts/demo-crash.mjs`:
 **Ліміти:** token bucket 10 повідомлень/с, кадр ≤ 4 КБ, тіло запиту ≤ 1 КБ, ≤ 8 гравців у кімнаті, ≤ 20 кімнат, join за 5 с, політика повільного клієнта за `bufferedAmount`.
 
 **Блокування event loop:** обробник, що крутить CPU 300 мс, затримав чат усіх гравців до 310 мс (норма — 1 мс). **Падіння:** `'error'` без слухача або необроблений reject валить увесь сервер (код 1); виправлення — слухачі та `.catch()` там, де помилка виникає.
+
+---
+
+# FlyOrDie (Lab 5) — Authoritative server, prediction, interpolation, binary protocol
+
+## Layout
+
+```
+shared/   @flyordie/shared — pure, deterministic simulation + protocol + codecs (no DOM, no Node built-ins)
+  src/sim/        Lab 1–4 simulation moved here; stepShipMotion(); dmath.js (bit-exact trig); determinism.js
+  src/net/        protocol.js (tick rate, inputs, snapshot model), codec-binary.js (DataView + spec), codec-json.js
+  src/bot.js      autopilot used by headless clients and ?autopilot=1
+server/src/match.js       one 30 Hz authoritative simulation per room
+client/src/net/netgame.js prediction · reconciliation · smoothing · interpolation · bullet prediction
+client/src/net/netgraph.js the overlay
+client/duel.html           dev tool: two clients side by side → records the GIF above
+```
+
+The client imports `@flyordie/shared/…` (npm workspace). Vite resolves it and bundles it in the build. A plain static server (VS Code Live Server) uses the `<script type="importmap">` in `index.html`. The server imports the same files through `node_modules`.
+
+## How a frame flows
+
+```
+client step (30 Hz, DT = 1/30)                      server tick (30 Hz, absolute-target timer)
+  read keys → input {seq, buttons}                    for each player: take ONE input from its queue
+  send [last 3 inputs] (binary, 2+5n bytes) ───────▶  (queue absorbs jitter; dup/old seq ignored)
+  predict own ship: stepShipMotion(me, input, DT)     world.step(DT)  — the same shared code
+  predict own bullet if it fired                      snapshot {tick, ack = last applied seq, entities, events}
+                                       ◀───────────── binary 448 B (4 players) — per client, own ack
+  on snapshot: me ← server state; drop inputs ≤ ack; replay the rest; decaying visual offset
+  remote entities: lerp(snapshot a, snapshot b) at server tick (now − 100 ms)
+  events (explosions, sounds, popups) fire when the interpolated picture reaches their tick
+```
+
+## Controls and switches
+
+| In a match      |                                                                                                                |
+| --------------- | -------------------------------------------------------------------------------------------------------------- |
+| `1` `2` `3` `4` | latency presets: off · 100 ms ±30 / 2% · 200 ±50 / 5% · 300 ±100 / 10% (server-side injector, both directions) |
+| `P`             | prediction on/off (off = the "dumb client" of M1: your plane moves only when a snapshot says so)               |
+| `I`             | interpolation on/off (off = draw the latest snapshot: 30 Hz stutter)                                           |
+| `[` `]`         | interpolation delay −/+ 17 ms (one tick ≈ 33 ms)                                                               |
+| `C`             | **chaos**: `Math.random()` in the client's ship physics (the determinism-break experiment)                     |
+| `N`             | netgraph show/hide                                                                                             |
+
+URL equivalents: `?lag=100&jitter=30&drop=2&codec=json&predict=0&interp=0&delay=66&chaos=1&autopilot=1&join=eu-1&name=Ace`. `GET /api/stats` shows the server's tick duration/jitter per match and KB/s per connection.
+
+![netgraph with prediction](docs/lab-05/netgraph-prediction.jpg)
+
+## M4 — JSON vs binary (`node server/scripts/netcode-bench.mjs`)
+
+4 headless clients (the real `connection.js` + `netgame.js` running in Node), 30 Hz, 12 s each:
+
+| Codec               | Bytes/snapshot | KB/s per client (down) | KB/s per client (up) | Encode+decode µs |
+| ------------------- | -------------- | ---------------------- | -------------------- | ---------------- |
+| JSON                | 3764           | 110.2                  | 1.53                 | 67.3             |
+| Binary (`DataView`) | 448            | 13.2                   | 0.42                 | 10.4             |
+
+**8.4× less bandwidth down, 6.5× faster to encode+decode** (23-entity snapshot). Up: one binary input packet is 2 + 5·3 = 17 bytes (three redundant inputs) against ~60 bytes of JSON.
+
+### Binary protocol spec (v1, little-endian everywhere)
+
+The full spec is the comment at the top of `shared/src/net/codec-binary.js`. In short:
+
+```
+INPUTS    u8 type=1 · u8 n · n × (u32 seq · u8 buttons[left,right,thrust,fire])
+SNAPSHOT  u8 type=2 · u8 version=1 · u32 tick · u32 ack · u16 entityCount · u8 eventCount
+          entity: u16 id · u8 kind · f32 x · f32 y · i16 angle (1/10000 rad)            13 B
+            ship    + f32 vx,vy · u8 hp · u8 flags · u16 score,deaths · u16 ms ×4 · u8 cd  36 B
+            bullet  + i16 vx,vy (px/s) · u16 owner · u32 spawnSeq · u8 fast               24 B
+            rock    + u8 size · u8 flags                                                  15 B
+            pickup  + u8 effect · u8 lifeLeft (0.1 s)                                     15 B
+          event:  u8 type · f32 x · f32 y · u16 a · u16 b                                 13 B
+```
+
+**Angle as `Int16` in 1/10000 rad:** ±π × 10000 = ±31416 fits in ±32767, so the precision is 0.0001 rad. At the plane's nose (28 px from the centre) that's 0.003 px, far below a pixel. Rocks spin forever, so angles are wrapped into (−π, π] before quantizing (the round-trip test caught that). Bullet velocities as `Int16` px/s: ±32767 is far above the max ~1300 px/s, rounding ≤ 0.5 px/s.
+
+**Round-trip tests** (`shared/test`): `decode(encode(snapshot))` equals the original within the quantization tolerances for every field; inputs round-trip exactly; garbage is rejected; decoding respects a Node `Buffer`'s `byteOffset`. A `Buffer` is a view into a shared 8 KB pool, so `new DataView(buf.buffer)` would read someone else's bytes.
+
+## Netcode write-up
+
+**The three problems and the design.**
+
+- _Cheating:_ clients send only _inputs_ (`buttons` 0–15 + `seq`). The server validates them (shape, range, monotonic seq, rate-limited by a token bucket) and runs the only simulation that counts. A client can't teleport, refill HP or fire faster: it never sends positions, HP or cooldowns.
+- _Consistency:_ one simulation, on the server, at a fixed 30 Hz; everyone renders the same snapshots.
+- _Latency:_ the cost of the first two. Hidden by **prediction** of your own plane and bullets, and by **interpolation** of everything else.
+
+**What the netgraph showed.** At 100 ms ±30 the RTT reads ~145 ms (100 ms of injected lag plus jitter both ways). With prediction **off** (`P`), the plane starts turning about 145 ms after the key, plus the 100 ms interpolation delay if you watch yourself interpolated. It feels like steering through mud. **Pending inputs** sits at 6–7, that's RTT / 33 ms. With prediction **on**, the plane reacts on the same frame. The correction graph stays at 0 in open space and spikes only on collisions: the server knows about the rock's bounce, the client didn't predict it. That's the 55 px spike in the screenshot above, after a −42 HP hit.
+
+| Client physics (4 headless clients, 100 ms ±30, 2% drop) | RTT    | pending | corrections = 0 | mean    | p95     |
+| -------------------------------------------------------- | ------ | ------- | --------------- | ------- | ------- |
+| deterministic — shared `stepShipMotion`                  | 144 ms | 6.5     | **99%**         | 0.83 px | 0.00 px |
+| `Math.random()` in the client only (`?chaos=1`)          | 155 ms | 6.0     | **13%**         | 4.73 px | 9.38 px |
+
+![netgraph with chaos](docs/lab-05/netgraph-chaos.jpg)
+
+**The determinism bug I actually hit (not the planted one).** `simulationHash(600)` runs the shared sim for 600 steps with scripted inputs. Node gave `99fcd6d2`, Chrome gave `2fc52ad4`: same code, same inputs, different worlds. Fingerprinting Math functions over 5,000 inputs in both engines showed that **Chrome 156 and Node 24 (V8 13.6) return different bits for `Math.sin`, `cos`, `atan2` and `exp`**, while `pow`, `sqrt`, `hypot` and `round` matched. ECMAScript only requires these to be "implementation-approximated". The fix is `shared/src/sim/dmath.js`: `dsin`/`dcos`/`datan2` built only from `+ − × ÷` (exactly specified by IEEE-754), using fdlibm's polynomials (≤ 1 ulp from `Math`). Drag uses repeated multiplication instead of `Math.pow`. Now both engines give **`b736f092`**. A test pins that hash, and `?demo=determinism` prints the browser's.
+
+**Interpolation delay: 100 ms (3 ticks).** With a 30 Hz tick, a snapshot interval is 33 ms. Two intervals (66 ms) is the textbook minimum, but with ±30 ms jitter and 2% drop a single late or lost snapshot left the buffer empty and remote planes froze for a frame. Three intervals survive one lost snapshot plus jitter. The cost: you see other players ~100 ms + RTT/2 behind where they really are, which hurts aiming (Stretch: lag compensation). `[`/`]` change it live: at 33 ms remote planes visibly stutter, at 200 ms they're smooth but feel late.
+
+**Server timing.** `setInterval(fn, 33)` on Windows ran at **25.8 Hz** (gaps of 38.8 ms on average): timers are coarse and the delay is a _minimum_, so the error accumulates. The absolute-target scheme (`nextAt += 33.33; setTimeout(run, nextAt − now)`) ran at **29.96 Hz**. Each tick may be a few ms late, but the error never accumulates. A tick takes 0.38 ms on average (max 2.8 ms) for 4 players and ~30 entities; overruns: 0. If a tick overran, the schedule re-bases instead of firing a burst of catch-up ticks.
+
+**Other details that mattered.**
+
+- One input = one step of DT, on both sides. The server applies _exactly one_ queued input per player per tick, and `ack` is the seq it applied. That is what makes "reset to the server's state, replay inputs > ack" land on the same place. When a player's queue is empty (jitter), the server repeats their last controls without advancing `ack` (`starved` in `/api/stats`), and the client's next reconciliation absorbs it.
+- Each input packet carries the last 3 inputs, so a dropped packet costs nothing. The server drops duplicates by seq.
+- Own bullets are spawned locally on the step that fired them, tagged with that input's `seq`. The server's bullet carries the same `spawnSeq`, which confirms it. When the server's bullet disappears (it hit something), the local one is removed.
+- The JSON codec at first had no `v: 1` in input messages, and the server (correctly) closed those sockets with 4002. The headless benchmark found it.
+
+## Reflection answers (short)
+
+1. Client-authoritative designs break **consistency** (each client's floats and packet loss drift apart, so players see different games) and **trust**: set `ship.hp = 9999` or send `{x, y}` anywhere from DevTools. With inputs-only, the worst a cheater can send is a key press.
+2. Prediction runs your inputs through the same `stepShipMotion` immediately. It depends on **determinism**. Detect a violation with the correction magnitude: it should be ~0 away from collisions. Or hash both sides, like `simulationHash`.
+3. Snapshot for tick 100 arrives with `ack = 57`; the buffer holds 55–61. Set the ship to the snapshot's state (that's after input 57), drop 55–57, replay 58–61 in order. Now the ship is where the server will put it after receiving 58–61. Compare with the pre-snapshot position: that difference is the correction, and it is smoothed out over ~100 ms.
+4. Snapshots are discrete (30 Hz) and arrive irregularly. Interpolating between two _known_ past states gives smooth motion without guessing. Trade-off: smoothness/robustness vs how far in the past others appear. I chose 100 ms (see above).
+5. Lag compensation: the server rewinds other entities to what the shooter saw (now − their interpolation delay − latency) to resolve a hit. Without it, you must lead targets by ~150 ms because you always see them in the past.
+6. `DataView`: mixed layouts, explicit endianness, any offset → protocols. `Float32Array`: one type, platform-endian, aligned → bulk numeric data in memory (Lab 7). Endianness matters on the wire because the other end may be a different CPU. Inside one process it's always consistent.
+7. 0.0001 rad, worst case 0.003 px at the nose, verified by the round-trip test tolerance.
+8. `setInterval` drifts and coalesces (25.8 Hz measured). Absolute targets fix the _average_ rate. On overrun, re-base instead of bursting, and count it.
+9. `Math.random()` → client and server diverge (−86% exact predictions, measured). Iterating a `Set` → fine only if insertion order is the same everywhere; ours is, because one server builds the world. `Date.now()` → depends on wall clock, not on the tick, so two runs differ.
+
+---
+
+# FlyOrDie (Лабораторна 5) — авторитетний сервер, передбачення, інтерполяція, бінарний протокол
+
+**Що зроблено:**
+
+- `shared/` — спільна детермінована симуляція для клієнта й сервера.
+- Сервер рахує світ 30 разів на секунду з точним таймером. Клієнти надсилають лише натискання, сервер розсилає знімки світу.
+- Свій літак клієнт передбачає миттєво, звіряє зі знімком і плавно згладжує корекцію. Чужі літаки малюються з інтерполяцією на 100 мс у минуле. Свої кулі теж передбачаються.
+- Імітатор затримки, джитеру й втрат пакетів, оверлей netgraph.
+- Бінарний протокол на `DataView` зі специфікацією і тестами. GIF з двома клієнтами вгорі README.
+
+**Цифри:**
+
+- Бінарний знімок — 448 байт проти 3764 у JSON, тобто 13,2 КБ/с проти 110,2 КБ/с (у 8,4 раза менше). Кодування й декодування — 10 мкс проти 67 мкс.
+- При затримці 100 мс ±30 і 2% втрат: 99% передбачень точні. З `Math.random()` у фізиці клієнта — лише 13%.
+
+**Знайдений баг детермінізму:** Chrome 156 і Node 24 повертають різні біти з `Math.sin`, `cos`, `atan2`, `exp`, тож хеш симуляції відрізнявся. Виправлено власною тригонометрією `dmath.js` лише на `+ − × ÷`: тепер хеш однаковий (`b736f092`).
+
+**Таймер:** `setInterval(33)` на Windows дав 25,8 Гц, таймер з абсолютною ціллю — 29,96 Гц.

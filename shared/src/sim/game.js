@@ -22,11 +22,11 @@ export const DEFAULT_ARENA = Object.freeze({
   terrain: 'grass', // render-only: battlefield palette (grass / desert / snow)
 });
 
-export function createGame({ width, height, arena = DEFAULT_ARENA, playerName = 'P1' }) {
+/** A world with the arena's rules and asteroids, but no players yet (the server's Match). */
+export function createMatchWorld({ width, height, arena = DEFAULT_ARENA }) {
   const rules = { ...DEFAULT_ARENA, ...arena };
   const world = new World({ width, height, seed: rules.seed, onCollision });
   world.rules = rules;
-  const player = world.spawn(new Ship({ x: width / 2, y: height / 2, name: playerName }));
 
   let pickupTimer = rules.pickupEvery;
   world.systems.push(function director(w, dt) {
@@ -42,6 +42,20 @@ export function createGame({ width, height, arena = DEFAULT_ARENA, playerName = 
   });
 
   for (let i = 0; i < rules.initialAsteroids; i++) spawnAsteroidAtEdge(world);
+  return world;
+}
+
+/** Adds a player's ship at a safe spot (deterministic: uses the world's seeded RNG). */
+export function spawnPlayerShip(world, name) {
+  const spot =
+    world.size > 0 ? world.findSafeSpot(150) : { x: world.width / 2, y: world.height / 2 };
+  return world.spawn(new Ship({ x: spot.x, y: spot.y, name }));
+}
+
+/** Offline / single-player game (Labs 1–4): a match world with one local player. */
+export function createGame({ width, height, arena = DEFAULT_ARENA, playerName = 'P1' }) {
+  const world = createMatchWorld({ width, height, arena });
+  const player = world.spawn(new Ship({ x: width / 2, y: height / 2, name: playerName }));
   return { world, player };
 }
 

@@ -22,5 +22,14 @@ export default [
     ],
     languageOptions: { ecmaVersion: 2024, sourceType: 'module', globals: globals.node },
   },
+  {
+    // Shared simulation/protocol: runs in BOTH runtimes → only globals common to Node and browsers
+    files: ['shared/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2024,
+      sourceType: 'module',
+      globals: globals['shared-node-browser'],
+    },
+  },
   prettier,
 ];
