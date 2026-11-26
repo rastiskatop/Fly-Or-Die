@@ -63,10 +63,17 @@ function devTestApi(): Plugin {
           }
           const chunks: Buffer[] = [];
           req.on('data', (c: Buffer) => chunks.push(c));
-          req.on('end', async () => {
-            await mkdir(dirname(target), { recursive: true });
-            await writeFile(target, Buffer.concat(chunks));
-            res.end(`saved ${target}`);
+          // A failed write used to be an unhandled rejection and a request that never answered.
+          req.on('end', () => {
+            mkdir(dirname(target), { recursive: true })
+              .then(() => writeFile(target, Buffer.concat(chunks)))
+              .then(
+                () => res.end(`saved ${target}`),
+                (err: unknown) => {
+                  res.statusCode = 500;
+                  res.end(`save failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+                },
+              );
           });
           return;
         }

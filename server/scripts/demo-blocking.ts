@@ -7,6 +7,7 @@ import { once } from 'node:events';
 import WebSocket, { type RawData } from 'ws';
 import { ServerMessageSchema } from '@flyordie/shared/net/messages.ts';
 import { forkServer } from './fork-server.ts';
+import { toBuffer } from '../src/ws.ts';
 
 const server = await forkServer({
   DEBUG_ROUTES: 'true',
@@ -32,7 +33,7 @@ interface Latency {
 }
 const latencies: Latency[] = [];
 bob.on('message', (raw: RawData) => {
-  const parsed = ServerMessageSchema.safeParse(JSON.parse(raw.toString()));
+  const parsed = ServerMessageSchema.safeParse(JSON.parse(toBuffer(raw).toString()));
   if (!parsed.success) return;
   const m = parsed.data;
   if (m.type === 'chat' && m.from.name === 'Alice') {
@@ -48,11 +49,12 @@ const sender = setInterval(
 
 const blocks: [start: number, end: number][] = [];
 for (const at of [1000, 2000, 3000]) {
-  setTimeout(async () => {
-    const start = now();
-    await fetch(`${base}/api/debug/block?ms=300`);
-    blocks.push([start, now()]);
-  }, at);
+  setTimeout(() => void block(), at);
+}
+async function block(): Promise<void> {
+  const start = now();
+  await fetch(`${base}/api/debug/block?ms=300`);
+  blocks.push([start, now()]);
 }
 
 await new Promise((r) => setTimeout(r, 4000));

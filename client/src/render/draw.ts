@@ -21,17 +21,18 @@ export function lerpAngle(a: number, b: number, t: number): number {
 }
 
 // Interpolated render position; no lerp across an arena wrap (it would streak across the screen).
-function renderPos(
-  e: Drawable,
-  alpha: number,
-  width: number,
-  height: number,
-): { x: number; y: number; angle: number } {
+// Lab 7: written into ONE scratch object (read right after the call) instead of returning a new
+// { x, y, angle } per entity per frame — it was the #4 allocator in the profile.
+const scratch = { x: 0, y: 0, angle: 0 };
+function renderPos(e: Drawable, alpha: number, width: number, height: number): typeof scratch {
   let x = e.prevPos.x + (e.pos.x - e.prevPos.x) * alpha;
   let y = e.prevPos.y + (e.pos.y - e.prevPos.y) * alpha;
   if (Math.abs(e.pos.x - e.prevPos.x) > width / 2) x = e.pos.x;
   if (Math.abs(e.pos.y - e.prevPos.y) > height / 2) y = e.pos.y;
-  return { x, y, angle: lerpAngle(e.prevAngle, e.angle, alpha) };
+  scratch.x = x;
+  scratch.y = y;
+  scratch.angle = lerpAngle(e.prevAngle, e.angle, alpha);
+  return scratch;
 }
 
 /**
@@ -48,10 +49,15 @@ export function drawWorld(
   sprites: Sprites | null = null,
 ): void {
   const { width, height } = world;
-  // Draw order by kind: effects under everything, ships on top.
-  for (const kind of DRAW_ORDER) {
-    for (const e of world.ofKind(kind)) {
-      if (!e.alive && e.kind !== 'explosion') continue;
+  // Draw order by kind: effects under everything, ships on top. Indexed loops over plain arrays:
+  // no iterator objects in the hottest loop of the frame (Lab 7).
+  for (let k = 0; k < DRAW_ORDER.length; k++) {
+    const kind = DRAW_ORDER[k];
+    if (!kind) continue;
+    const list = world.ofKind(kind);
+    for (let i = 0; i < list.length; i++) {
+      const e = list[i];
+      if (!e || (!e.alive && e.kind !== 'explosion')) continue;
       const p = renderPos(e, alpha, width, height);
       ctx.save();
       ctx.translate(p.x, p.y);
@@ -271,8 +277,15 @@ function drawExplosion(ctx: Ctx, ex: DrawableExplosion): void {
   const life = Math.max(0, ex.ttl / ex.maxTtl);
   ctx.globalAlpha = life;
   ctx.fillStyle = ex.color;
-  for (const p of ex.particles) {
-    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+  // Lab 7: whole-pixel particles. Fractional numbers passed to a Canvas call are boxed into heap
+  // numbers (4 per particle per frame — the #1 allocator once the views were fixed); small integers
+  // (Smis) are not. Snapping 1–3 px sparks to the pixel grid is invisible.
+  const { particles } = ex;
+  for (let i = 0; i < particles.length; i++) {
+    const p = particles[i];
+    if (!p) continue;
+    const s = Math.max(1, Math.round(p.size));
+    ctx.fillRect(Math.round(p.x) - (s >> 1), Math.round(p.y) - (s >> 1), s, s);
   }
   // Initial flash
   if (life > 0.8) {

@@ -1,10 +1,12 @@
 # FlyOrDie — real-time multiplayer air combat in the browser
 
+[![CI](https://github.com/rastiskatop/Fly-Or-Die/actions/workflows/ci.yml/badge.svg)](https://github.com/rastiskatop/Fly-Or-Die/actions/workflows/ci.yml)
+
 ![two clients dogfighting through an authoritative server at 100 ms ±30 ms latency, 2% packet loss](docs/lab-05/duel.gif)
 
 _Two independent clients (left: Red, right: Blue) on one authoritative Node server, both with 100 ms ±30 ms injected latency and 2% loss. Each client predicts its own plane, interpolates the other one ~100 ms in the past, and talks a binary `DataView` protocol at 30 Hz. The overlay is the netgraph._
 
-**Quick start:** `npm install`, then `npm run dev`, then open http://localhost:5173 in two windows and join the same battlefield. Or run `npm start` and open http://localhost:8787. Checks: `npm run typecheck`, `npm run lint`, `npm test` (28). Since Lab 6 everything is TypeScript (Node ≥ 22.18 runs the server's `.ts` files directly). VS Code Live Server serves the **built** client, so run `npm run build` once first.
+**Quick start:** `npm install`, then `npm run dev`, then open http://localhost:5173 in two windows and join the same battlefield. Or run `npm start` and open http://localhost:8787. Checks: `npm run typecheck`, `npm run lint`, `npm test` (100 Vitest tests), `npm run e2e` (Playwright, two browsers). Since Lab 6 everything is TypeScript (Node ≥ 22.18 runs the server's `.ts` files directly). VS Code Live Server serves the **built** client, so run `npm run build` once first.
 
 > **Windows PowerShell:** if `npm` fails with *"running scripts is disabled on this system"* (`npm.ps1` is blocked by the default execution policy), run `npm.cmd run dev` / `npm.cmd start` instead, or allow local scripts once with `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
@@ -889,3 +891,225 @@ The lobby and HUD stay vanilla. The HUD is drawn on the **canvas** every frame, 
 **Фреймворк:** не використовується. HUD малюється на canvas. Лобі невелике й уже працює через типізовану шину. Фреймворк додав би ще один збирач і власне середовище виконання в бандл.
 
 **Live Server:** браузер не виконує `.ts`. Тому кореневий `index.html` відкриває зібрану версію з `client/dist` або підказує спершу виконати `npm run build`.
+
+---
+
+# FlyOrDie (Lab 7) — engines, memory and tests: prove it works, then make it fast
+
+## Run it
+
+| Command | What |
+| --- | --- |
+| `npm test` | Vitest, all three packages as projects: **100 tests**, 15 of them fast-check properties |
+| `npm run coverage` | the same with V8 coverage; fails if `shared/` drops under 85 % (it is at **96.5 % lines**) |
+| `npm run e2e` | Playwright: two browser contexts against the real server (`webServer: npm run dev`) |
+| `npm run lint` | typescript-eslint **type-checked** rules incl. `no-floating-promises` |
+| `node scripts/profile-client.ts <label>` | the client profile behind every table below (CDP: trace, CPU, heap) |
+| `node server/scripts/profile-server.ts <label> --bots=63` | `node --cpu-prof` on a match full of bots |
+| `node server/scripts/load-test.ts` | the capacity ramp (headless `ws` clients) |
+| `node scripts/worker-bench.ts` | the Web Worker go/no-go benchmark |
+| `POST /api/rooms/:id/bots {"count": n}` | add (or with 0 remove) server-side AI pilots |
+
+CI (`.github/workflows/ci.yml`, badge on top): `npm ci` → typecheck → lint → coverage → build → Playwright e2e, on every push and PR.
+
+## M1 — the test suite
+
+All three packages moved from `node:test` to **Vitest** (`vitest.config.ts` at the root runs `shared`, `server` and `client` as projects).
+
+| Area | What is tested |
+| --- | --- |
+| `Vector2` | add/sub/scale/dot/length, immutability, `normalize(0)` has no NaN, rotate, clamp |
+| Ship motion (`stepShipMotion`) | stays put without input, thrust/drag, turn rate and angle range, top speed (×2 with the pickup), wrap, fire cooldown and effect expiry |
+| Collisions | overlapping / touching (not a hit) / missing; one report per pair; dead and non-collidable skipped; **fast bullet tunneling** (below) |
+| `World` | deferred spawn/despawn, `ofKind`, bounce edges, **determinism: two worlds, same seed and inputs → deep-equal** |
+| Game rules | kill scores for the shooter, no self-hits, shields, pickups, rock splitting, respawn with protection, inherited bullet velocity |
+| Pools | explosion particles are recycled; snapshot entity objects; remote view objects |
+| Reconciliation (`client/src/net/reconcile.ts`, extracted from `NetGame` as a pure function) | exact prediction → correction 0 and acked inputs dropped; a server push → the exact correction; replay off; replayed fire restarts the cooldown; corrections measured through the wrap |
+| Game loop (fake timers) | 60 steps per second at any frame rate; alpha in [0, 1); a 5-s stall is clamped to exactly 15 catch-up steps; fps/ups stats; `stop()` |
+| Heartbeat (fake timers, extracted to `server/src/heartbeat.ts`) | a live socket is pinged and kept; a dead one is terminated on the 3rd beat; stop |
+| Token bucket | burst then exactly the sustained rate; never above the burst; a clock going backwards adds nothing |
+| Bots | evade beats chase, chase + shoot, ignore protected enemies, aim through the wrap, one input per tick through the players' door |
+| Server integration | HTTP API, two clients in one room with chat, protocol violations, rate limit, binary netcode, replays, **bots endpoint** |
+
+**fast-check properties (15)**: binary codec round-trip within the spec's quantization; encoded length = 13 + Σ entity sizes + 13 × events (also = `snapshotSize`); inputs round-trip and are 2 + 5n bytes; **random garbage never makes a decoder throw anything but a clean `Error`** (2,000 runs); a valid frame with one corrupted byte or truncated still fails cleanly; pooled decode ≡ fresh decode; JSON codec round-trip; `parseClientMessage` accepts every generated valid message, **rejects every mutation** (wrong version, unknown type, a field dropped or replaced by junk) and never throws on any text; **ships stay in the arena over 1,000 random input steps**; determinism over random input sequences; buttons ↔ controls is a bijection; the swept collision is never weaker than the point test; and the notes' `fc.float` / `fc.double` + `Math.fround` experiment (float32 passes, double fails and shrinks).
+
+### What the tests found
+
+- **Bullets tunneled through rocks.** "Does yours?" — yes. A fast bullet plus a ship's speed is ~2,000 px/s, i.e. 67 px per 1/30-s server tick. The smallest rock plus the bullet is 34 px wide, so the end-of-step circle test missed it completely: x = 600 → 667 straight through a rock at x = 640. The test was red first. The fix is a **swept test**: for bullets, the segment from `prevPos` to `pos` is checked against the circle. It uses only `+ − × ÷`, so the browser and Node stay bit-identical. This is the one intended change to the simulation, so the golden hash changed once, from `b736f092` to **`46a323ea`**. Chrome and Node both print the new value, and the pools added later did not change it.
+- **My own refactor bug:** after moving the heartbeat to its own module, shutdown still called `clearInterval(heartbeat)` on a variable that no longer existed. The server integration test failed at once with exit code 1 instead of 0.
+
+### Lint with type information (`recommendedTypeChecked` + `no-floating-promises`)
+
+What it found, all fixed:
+- **`http.createServer(async (req, res) => …)`:** Node ignores the returned promise, so a rejection would be an unhandledRejection, which crashes the process. Now `(req, res) => void handleRequest(req, res)`, and `handleRequest` catches everything itself.
+- **The duel recorder's save endpoint in `vite.config.ts`:** an `async` `req.on('end')` handler. A failed write was an unhandled rejection *and* left the request without a response. Now it answers 500.
+- **Floating `async` listeners and timers** in the lobby's create form and two scripts.
+- **`sleep()` rejected with `signal.reason`,** which is typed `any` and may not be an `Error`.
+- **`String(err)` could print `[object Object]`.**
+- **`any` leaking in from `events.once()` and `Object.entries(interface)`.** Now `firstArg()`, which returns `unknown`, and a `type` alias.
+
+## M2 — end-to-end (`e2e/two-pilots.spec.ts`)
+
+Two browser contexts (separate cookies, storage and sockets) join one room. The test checks:
+1. Both rosters show both names.
+2. Alpha holds W, and **Bravo sees Alpha's ship move within 500 ms**. Locally it takes about 60 ms: the 100-ms interpolation delay is mostly already "in the past".
+3. Alpha's chat message appears in Bravo's log.
+
+Locally it drives the installed Microsoft Edge (no browser download); CI installs Chromium.
+
+## M3 — profile, fix, measure
+
+**Method.** `scripts/profile-client.ts` builds the client *unminified* (readable names), starts the real server with **8 bots** in one room, and opens the game in Edge as an autopilot pilot with `?perf=1`. After a 5-s warm-up it records 30 s over the DevTools protocol, i.e. with the same tools as the Performance and Memory panels:
+- `Tracing` for GC events;
+- the CPU `Profiler` for self time and a flame chart;
+- the sampling `HeapProfiler` (including objects that were already collected) for allocators;
+- `performance.mark/measure` spans around `simulate`, `render`, `decode` and `reconcile` (`client/src/perf.ts`: a fixed ring buffer, zero cost when off).
+
+Environment: Windows 11, Edge 157 (headless), Node 24.16. The full results are in `docs/lab-07/profile-*.json`.
+
+> Frame *intervals* follow the display's vsync, and headless Edge picked ~93 Hz in the "before" run but 60 Hz in the later ones. So intervals are not comparable between those runs; the CPU work per frame (`render` span) and the GC numbers are.
+
+| 30 s, 8 bots | frame interval p50 / p95 / p99 / max | frames > 20.8 ms | render CPU p50 / p99 | minor GCs | **major GCs** (total, longest) | `drawImage` self time | top-8 allocations |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **before** | 10.8 / 14.8 / 17.9 / 57.5 ms (~93 Hz) | — (counter added later) | 1.9 / 3.2 ms | 1 | **20** (69.5 ms, 7.1 ms) | 3,140 ms (10.4 %) | 57.8 MB |
+| **after** | 16.7 / 17.0 / 17.2 / 50.1 ms (60 Hz) | **1 of 1,804** | **0.9 / 1.7 ms** | 19 | **8** (32 ms, 8.8 ms) | **254 ms** (0.8 %) | **19.0 MB** |
+| after, CPU ×4 throttle | 16.7 / 16.9 / 17.0 / 233 ms | 6 of 1,799 | 2.9 / 6.1 ms | 13 | 8 (111 ms, 34 ms) | 1,199 ms | 18.4 MB |
+
+**Before**
+- Top allocators: `toView` 16.0 MB, `lerpEntity` 12.4 MB, generator `next` 7.8 MB, `drawWorld` 6.4 MB, `decodeSnapshot` 4.2 MB.
+- Top self time: `drawImage` 3,140 ms, `fillText` 360 ms, `draw` 168 ms.
+
+**Flame charts** (busy time only; green = game code, blue = browser/runtime, orange = GC): [before](docs/lab-07/flame-before.svg) · [after](docs/lab-07/flame-after.svg)
+
+![client flame chart before](docs/lab-07/flame-before.svg)
+
+**Fixes, in order of measured impact** (each is a real measurement, never "just in case"):
+
+1. **The SVG sprite sheet is rasterized once into a canvas** (`render/sprites.ts`). `drawImage` from an SVG `<img>` makes the browser re-rasterize on draw. It was the #1 self-time function: 3,140 → 254 ms, about 12× less.
+2. **Remote entities became reused view objects** (`net/remote-views.ts`). Per entity per frame, `lerpEntity` spread-copied the state, `toView` built a new object + a `Vector2` + (for ships) a new effects `Map`, and `RenderWorld.ofKind` was a generator (one iterator-result object per entity). Now there is one object per entity id, updated in place, and draw lists are reused arrays with indexed loops. Lists of one kind come from one factory, so they share one hidden class and the loads in the draw code stay monomorphic.
+3. **Less garbage reaches the old generation.** This Chrome's young generation is collected by *minor mark-sweep*, which **promotes whatever is alive** at that moment, so anything that lives ~0.5–2 s ends up as old-generation garbage:
+   - snapshot history: 60 snapshots (2 s) → only what the interpolation delay needs (~9);
+   - no `Map` per snapshot: a preallocated id-indexed array + an `Int32Array` of generation stamps instead;
+   - **pools** for decoded snapshot entities (`SnapshotPool`), for explosion particles, and for remote views (a bullet view is recycled for the next bullet).
+4. **Smaller ones**:
+   - cloud gradients were `createRadialGradient()` 6× per frame and are now built once;
+   - `renderPos` returns a reused scratch object;
+   - `Map.clear()` (a new backing table every call) became set/delete;
+   - particles are drawn at whole pixels, because fractional numbers passed to Canvas calls are boxed into heap numbers and small integers are not;
+   - the branded-id constructors were a full zod parse per id. They are now type guards with the same checks, still without an `as`.
+
+**Zero major GCs: not reached, and here is precisely why.** 20 major GCs fell to 7–8. Each remaining one is V8's *finalization of incremental marking* on a **~4 MB heap**: "finalize incremental marking via task", 4.1 MB → 4.4–7.4 MB → 4.1 MB, about every 4 s. Most of the marking runs concurrently on background threads; the main-thread pause is 2–9 ms, inside one frame's budget at the measured render cost (p99 1.7 ms). I ruled out with experiments, each with the same 30-s session (`docs/lab-07/experiment-*.json`):
+- the instrumentation itself (spans and heap sampler off: 9);
+- Web Audio nodes per shot (`?sound=0`: 9);
+- V8's memory reducer (`--js-flags=--no-memory-reducer`: 8).
+
+The promoted-only heap sample shows what's left: about 5 MB in 30 s of short-lived objects that a minor GC caught in flight (boxed numbers, freshly created views). With a heap this small, V8's old-generation limit is only a few MB above the live size, so even that triggers a cycle. On this machine, with a 60-Hz display, the result is: **frame p99 17.2 ms at 60 Hz, 1 missed frame in 1,804, render p99 1.7 ms**. The p99 *interval* can't drop under 16.7 ms at 60 Hz; the frame *work* is 10× under the budget.
+
+**Server** (`node --cpu-prof`, 60 s, 63 bots in one room, ~97 entities; [flame before](docs/lab-07/server-flame-before-63.svg) · [after](docs/lab-07/server-flame-after-63.svg)):
+
+| | tick p50 | tick p99 | max | event-loop utilization | top self time |
+| --- | --- | --- | --- | --- | --- |
+| before | 0.90 ms | 2.48 ms | 7.8 ms | 4.1 % | **`botDecide` + `offset` 524 ms** |
+| after | **0.55 ms** | **1.93 ms** | 7.1 ms | **1.7 %** | `botDecide` 67 ms |
+
+The hot spot was not collisions; it was the bots' own AI. Every bot scanned every entity and allocated an `{dx, dy, d}` object + a `Math.hypot` per pair, about 9,000 objects per tick. Now it uses plain locals and squared distances, with one `sqrt` per decision. **Spatial hash: not built, on purpose.** `findCollisions` is 1.3 % of server time even at N = 256 (below), and the brief says to do it "if collision was the hot spot". It wasn't. The collision system is still swappable (`world.collisions`) if a bigger arena ever needs it.
+
+## M4 — bots, a worker, and a load test
+
+**Bots** (`server/src/bots.ts`). A bot joins the room as a `Player`, the match spawns its ship, and every tick it sends **one `{ seq, buttons }` input through `match.pushInputs()`**, the same door a WebSocket client's inputs use. It sees only the tick's snapshot (what clients see), so the server can't tell a bot from a human. Its brain is a pure function, `botDecide()`:
+1. **evade** a rock inside its caution radius;
+2. else **chase** the nearest unprotected enemy ship (or a rock);
+3. **shoot** when the aim error is under its trigger threshold.
+
+Each bot has a personality (caution, trigger, preferred range). Bots leave when the last human does. `POST /api/rooms/:id/bots {"count": n}`, zod-validated.
+
+**Web Worker experiment: no-go** (`scripts/worker-bench.ts`, Edge, 600 real snapshot frames of 1,189 bytes / 45 entities). The candidate was snapshot decoding, the client's only per-snapshot work that could move:
+
+| | main-thread µs per snapshot | round trip |
+| --- | --- | --- |
+| decode on the main thread (current) | **33** | — |
+| worker, buffer *transferred* in, objects *cloned* back | 71: **worse**, deserializing the clone costs more than decoding the bytes | 0.2–0.6 ms |
+| worker, typed arrays (SoA) *transferred* back, zero-copy | 19: saves 14 µs | 0.1–0.3 ms |
+
+The best variant saves 14 µs × 30 snapshots/s ≈ 0.4 ms of main thread per second, under 0.05 %. The cost would be rewriting the whole render path from objects to struct-of-arrays, plus up to 0.3 ms of extra latency. Not worth it, so the worker stays a benchmark (`client/src/experiments/decode-worker.ts`). Transfer vs clone is visible right in the numbers: transfer is free, while cloning back 45 objects costs more than producing them.
+
+**Load test** (`server/scripts/load-test.ts`). N headless `ws` clients, 8 per room like real matches, each sending binary inputs at 30 Hz along a scripted loop with bursts of fire and receiving every snapshot. A separate process, on the same machine.
+
+| N clients | rooms | entities | worst-room tick p99 | event-loop utilization | tick overruns (15 s) | server RSS | server → clients |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 8 | 1 | 32 | 4.74 ms | 8.7 % | 0 | 81 MB | 0.1 MB/s |
+| 32 | 4 | 125 | 4 ms | 20.7 % | 0 | 88 MB | 0.6 MB/s |
+| 64 | 8 | 254 | 3.64 ms | 31.7 % | 0 | 96 MB | 1.2 MB/s |
+| 128 | 16 | 513 | 2.78 ms | 54.5 % | 9 | 113 MB | 2.4 MB/s |
+| 256 | 32 | 1034 | 2.69 ms | 93.1 % | 1856 | 148 MB | 4.6 MB/s |
+| 512 | 64 | 2109 | 2.19 ms | 100.0 % | 49438 | 230 MB | 8.0 MB/s |
+
+![load test](docs/lab-07/load.svg)
+
+**Capacity: N = 128 clients (16 rooms) per process, with margin.** The criterion: tick p99 ≤ 33.3 ms *and* the event loop ≤ 90 % busy. N = 256 is the knee: across two runs its event-loop utilization was 83 % and 93 %, with 23 and 1,856 tick overruns (up to 13 % of all ticks late). Linear extrapolation of the utilization puts the edge near 200 clients. The per-room tick time hardly moves (~2–5 ms) because each room's simulation is cheap. What saturates is the **one shared thread** every room and socket lives on: at N = 512 it is 100 % busy and ticks overrun constantly. The CPU profile at N = 256 ([flame chart](docs/lab-07/load-flame.svg)) answers *what* fills it:
+- **41 % `writev`**: socket writes, one system call per snapshot per client, 256 × 30 = 7,680 per second;
+- the whole simulation (`step`, `snapshotEntities`, `findCollisions`): ~5 %;
+- encoding: 1.3 %;
+- GC: under 1 %.
+
+So the bottleneck is **per-message I/O**, not tick CPU and not GC. The next steps would be (Lab 8) batching writes per socket, or more processes, one per core, with rooms spread across them.
+
+## V8, in numbers (the notes' experiments, Node 24)
+
+- **Deopt:** `%GetOptimizationStatus(add)` is `1010001` (TurboFan-optimized) after 10⁶ integer calls. After one `add('a', 'b')` it is `1`: deoptimized back to the interpreter.
+- **Shapes:** summing `.x` over 10⁶ objects:
+  - one shape: 2.9 ms;
+  - every 10th object with an extra `.z` (2 shapes, polymorphic): 3.4 ms;
+  - 20 shapes (megamorphic): **7.9 ms**;
+  - the same numbers in a `Float64Array`: **1.3 ms**.
+
+## Reflection answers (short)
+
+1. **Pipeline:** parser → AST → *Ignition* bytecode (runs at once, collects type feedback) → *Maglev* (fast mid-tier) → *TurboFan* (optimized machine code specialized for the types seen). Hot functions with stable feedback get optimized; a broken assumption (a new shape, a string where only numbers were seen) deoptimizes. In our code: the draw loop saw both arrays and generators until `ofKind` was made to always return arrays.
+2. **Hidden class:** the layout of an object (which properties at which offsets). One shape at a call site means one check and one load (monomorphic); 20 shapes mean a dictionary-like lookup every time (megamorphic, 2.7× slower above). So: initialize every field in the constructor or factory, always in the same order, and never add fields later. That's why each view kind and each pooled entity kind has a single factory.
+3. **Generational GC:** most objects die young, so the young generation is collected often, by touching only the survivors (cheap). The old generation is marked and compacted in full (expensive, even if mostly incremental and concurrent). A *long-lived* particle is the worst case: it survives the young collection (it gets copied or promoted) and then dies in the old generation, where only a major GC can reclaim it.
+4. **Top allocator:** `toView` + `lerpEntity` (28 MB/30 s): new view objects every frame, fixed by reusing them. The **downside of pooling**: objects must be reset completely, or stale data leaks (the property test "pooled ≡ fresh" exists for that); memory is never handed back unless capped; and a bug that keeps a pooled object after release creates aliasing.
+5. **Typed arrays:** dense, homogeneous storage. No per-element objects or headers, no boxing, no shape checks, and nothing for the GC to trace. You lose objects with methods and readable code, and mixed kinds (an entity is many arrays plus an index, and flexible fields become awkward).
+6. **Workers:**
+   - structured clone: a copy, cost proportional to the size, deserialized on the receiving thread;
+   - transfer of an `ArrayBuffer`: zero-copy, the sender loses it;
+   - `SharedArrayBuffer` + `Atomics`: truly shared, but needs COOP/COEP.
+
+   Ours lost because the work moved (33 µs) was smaller than the cost of bringing the result back as objects (71 µs).
+7. **Property vs example:** examples pin known cases and document intent; properties state invariants and let the generator find the cases I didn't think of. Our codec round-trip runs 300 random snapshots against the spec's quantization; on failure fast-check *shrinks* the input to the smallest snapshot that still fails.
+8. **`no-floating-promises`:** a server's async handler whose promise nobody handles. Its rejection is an unhandledRejection, and in Node ≥ 15 that **crashes the process** for every player. It found exactly that in `http.createServer(async …)`.
+9. **Capacity 128 (knee ≈ 200–256):** the bottleneck is per-message socket I/O on the one event-loop thread: 41 % in `writev`, while the tick is ~2 ms and GC is under 1 %. I know because tick p99 stayed flat while event-loop utilization climbed to 100 %, and the CPU profile at N = 256 shows where the thread's time went.
+
+---
+
+# FlyOrDie (Лабораторна 7) — рушій, пам’ять і тести
+
+**Тести:**
+- Усі три пакети тепер на Vitest: **100 тестів**, з них 15 — властивості fast-check. Покриття `shared/` — **96,5 %**.
+- Повний набір: фізика, колізії, детермінізм, реконсиляція як чиста функція, ігровий цикл і heartbeat на фейкових таймерах, кодек, парсер протоколу, боти.
+- Playwright запускає два браузери проти справжнього сервера і перевіряє ростер, рух іншого гравця (менш ніж за 500 мс) і чат.
+- CI: typecheck → lint (з перевіркою типів, `no-floating-promises`) → покриття → збірка → e2e. Бейдж — на початку README.
+
+**Що знайшли тести і лінтер:**
+- Швидка куля пролітала крізь малий астероїд: 67 пікселів за тік проти 34 пікселів ширини. Виправлено перевіркою всього відрізка, який пролетіла куля (swept collision); хеш детермінізму змінився один раз — на `46a323ea`, однаковий у браузері й у Node.
+- Асинхронний HTTP-обробник, чия помилка могла б покласти весь сервер.
+- Ендпоінт збереження GIF, який при помилці не відповідав на запит.
+
+**Профілювання клієнта (30 с, 8 ботів):**
+- Спрайт-лист (SVG) один раз растеризуємо в canvas: `drawImage` у 12 разів дешевший.
+- Об’єкти для малювання перевикористовуються, без алокацій на кадр.
+- Пули для сутностей знімків, частинок вибухів і view-об’єктів; знімків зберігаємо стільки, скільки потрібно для інтерполяції.
+- Результат: виділення пам’яті скоротилися з 58 до 19 МБ, CPU на рендер — з 1,9/3,2 до 0,9/1,7 мс (p50/p99), великих GC — з 20 до 8.
+- Нуль великих GC не досягнуто. Ті, що лишилися, — це завершення інкрементального маркування купи ~4 МБ з паузою 2–9 мс. Звук, інструментацію і memory reducer виключено експериментами. Пропущено 1 кадр із 1804.
+
+**Сервер:**
+- Найгарячіше місце — не колізії, а ШІ ботів. Після виправлення тік p99 — 2,48 → 1,93 мс.
+- Просторовий хеш не потрібен: колізії займають 1,3 % часу.
+
+**Боти** ходять тими самими «дверима» для інпутів, що й гравці; додаються через `POST /api/rooms/:id/bots`.
+
+**Web Worker — ні:**
+- Клонування результату з воркера дорожче (71 мкс), ніж декодування на головному потоці (33 мкс).
+- Варіант із передачею типізованих масивів економить лише 14 мкс на знімок.
+
+**Навантажувальний тест:** місткість — **128 клієнтів** на процес із запасом; межа — близько 200–256 клієнтів. Вузьке місце — запис у сокети (`writev`, 41 % часу), а не симуляція і не GC.

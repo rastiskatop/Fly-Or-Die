@@ -1,7 +1,8 @@
 {
-  // Root project: the repo-level Node scripts (scripts/dev.ts). Each workspace has its own
-  // tsconfig; `npm run typecheck` checks this one and then every workspace.
+  // Root project: repo-level Node scripts, the Vitest/Playwright configs and the e2e tests
+  // (which also run code in the page — hence DOM). Each workspace has its own tsconfig;
+  // `npm run typecheck` checks this one and then every workspace.
   "extends": "./tsconfig.base.json",
-  "compilerOptions": { "lib": ["ES2023"], "types": ["node"] },
-  "include": ["scripts"]
+  "compilerOptions": { "lib": ["ES2023", "DOM"], "types": ["node"] },
+  "include": ["scripts", "e2e", "vitest.config.ts", "playwright.config.ts"]
 }

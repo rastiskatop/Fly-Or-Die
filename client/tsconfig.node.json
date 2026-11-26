@@ -1,6 +1,6 @@
 {
-  // Node-side files of the client package: Vite config and the asset generators.
+  // Node-side files of the client package: Vite/Vitest config and the asset generators.
   "extends": "../tsconfig.base.json",
   "compilerOptions": { "lib": ["ES2023"], "types": ["node"] },
-  "include": ["vite.config.ts", "tools"]
+  "include": ["vite.config.ts", "vitest.config.ts", "tools"]
 }

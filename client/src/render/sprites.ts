@@ -25,8 +25,25 @@ export interface Sprites {
   radiusOf(name: string): number | null;
 }
 
-export function createSprites(image: CanvasImageSource, atlas: Atlas): Sprites {
+/**
+ * Lab 7: rasterize the SVG sheet ONCE into a canvas. drawImage() from an SVG <img> makes the browser
+ * re-rasterize (sub-)images on draw — the profile's #1 self-time function, and memory outside the
+ * JS heap that scales with the number of sprites drawn. From a canvas, drawImage is a plain blit.
+ */
+function rasterize(image: CanvasImageSource): CanvasImageSource {
+  if (!(image instanceof HTMLImageElement) || !image.naturalWidth) return image;
+  const canvas = document.createElement('canvas');
+  canvas.width = image.naturalWidth;
+  canvas.height = image.naturalHeight;
+  const g = canvas.getContext('2d');
+  if (!g) return image;
+  g.drawImage(image, 0, 0);
+  return canvas;
+}
+
+export function createSprites(source: CanvasImageSource, atlas: Atlas): Sprites {
   const scale = atlas.scale ?? 1; // the sheet is authored at 2x for HiDPI
+  const image = rasterize(source);
 
   return {
     has(name) {

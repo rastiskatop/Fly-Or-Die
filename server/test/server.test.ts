@@ -1,6 +1,6 @@
 // Integration: starts the real server (child process, random port, temp LOG_DIR) and talks to it
 // over HTTP and WebSocket like a browser would.
-import { test, before, after } from 'node:test';
+import { test, beforeAll as before, afterAll as after } from 'vitest';
 import assert from 'node:assert/strict';
 import { fork } from 'node:child_process';
 import { mkdtemp, readdir } from 'node:fs/promises';
@@ -11,6 +11,8 @@ import WebSocket, { type RawData } from 'ws';
 import type { ChildProcess } from 'node:child_process';
 import { z } from 'zod';
 import { binaryCodec } from '@flyordie/shared/net/codec.ts';
+import { toBuffer } from '../src/ws.ts';
+import { firstArg } from '../scripts/fork-server.ts';
 import { asSeq } from '@flyordie/shared/ids.ts';
 import type { Snapshot } from '@flyordie/shared/net/protocol.ts';
 import {
@@ -41,8 +43,9 @@ before(async () => {
       MAX_PLAYERS_PER_ROOM: '2',
     },
     stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
+    execArgv: [], // a plain `node src/index.ts`: don't inherit the test runner's flags
   });
-  const [msg] = await once(child, 'message');
+  const msg = await firstArg(child, 'message');
   const { port } = Listening.parse(msg);
   base = `http://127.0.0.1:${port}`;
   wsUrl = `ws://127.0.0.1:${port}/ws`;
@@ -50,7 +53,7 @@ before(async () => {
 
 after(async () => {
   child.send({ type: 'shutdown' }); // graceful: closes sockets, flushes logs, exits 0
-  const [code] = await once(child, 'exit');
+  const code = await firstArg(child, 'exit');
   assert.equal(code, 0);
 });
 
@@ -67,7 +70,7 @@ async function client() {
   const ws = new WebSocket(wsUrl);
   const messages: Msg[] = [];
   ws.on('message', (d: RawData, isBinary: boolean) => {
-    if (!isBinary) messages.push(ServerMessageSchema.parse(JSON.parse(String(d))));
+    if (!isBinary) messages.push(ServerMessageSchema.parse(JSON.parse(toBuffer(d).toString())));
   });
   const closed = new Promise<number>((resolve) => ws.on('close', (code: number) => resolve(code)));
   await once(ws, 'open');
@@ -174,12 +177,9 @@ test('binary netcode: inputs up, snapshots down with this client ack', async () 
   const snaps: Snapshot[] = [];
   let tickRate = 0;
   ws.on('message', (data: RawData, isBinary: boolean) => {
-    if (isBinary)
-      snaps.push(
-        binaryCodec.decodeSnapshot(Buffer.isBuffer(data) ? data : Buffer.from(String(data))),
-      );
+    if (isBinary) snaps.push(binaryCodec.decodeSnapshot(toBuffer(data)));
     else {
-      const msg = ServerMessageSchema.parse(JSON.parse(String(data)));
+      const msg = ServerMessageSchema.parse(JSON.parse(toBuffer(data).toString()));
       if (msg.type === 'welcome') tickRate = msg.tickRate;
     }
   });
@@ -197,8 +197,49 @@ test('binary netcode: inputs up, snapshots down with this client ack', async () 
   assert.ok(snaps.every((s, i) => i === 0 || s.tick > (snaps[i - 1]?.tick ?? -1)));
   assert.ok(last?.entities.some((e) => e.kind === 'ship'));
   ws.send(Buffer.from([1, 1, 0])); // malformed binary inputs
-  const [code] = await once(ws, 'close');
+  const code = await firstArg(ws, 'close');
   assert.equal(code, 4000);
+});
+
+test('POST /api/rooms/:id/bots: bots take slots, play (their inputs are acked), and leave on 0', async () => {
+  const setBots = (room: string, body: unknown) =>
+    fetch(`${base}/api/rooms/${room}/bots`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  const BotsResponse = z.object({ room: z.string(), bots: z.number() });
+  const StatsSchema = z
+    .object({
+      matches: z.array(
+        z.object({ room: z.string(), players: z.number(), starved: z.number(), ticks: z.number() }),
+      ),
+    })
+    .loose();
+
+  assert.equal((await setBots('eu-2', { count: -1 })).status, 400);
+  assert.equal((await setBots('nowhere', { count: 1 })).status, 404);
+  const res = await setBots('eu-2', { count: 5 }); // the room cap is 2 for this test server
+  assert.equal(res.status, 200);
+  assert.equal(BotsResponse.parse(await res.json()).bots, 2);
+
+  const { rooms } = await getJson(`${base}/api/rooms`, RoomsResponseSchema);
+  assert.equal(rooms.find((r) => r.id === 'eu-2')?.players, 2);
+
+  await new Promise((r) => setTimeout(r, 400)); // ~12 ticks
+  const stats = await getJson(`${base}/api/stats`, StatsSchema);
+  const match = stats.matches.find((m) => m.room === 'eu-2');
+  assert.ok(match && match.ticks >= 8, 'the match runs');
+  assert.equal(match.players, 2);
+  assert.ok(match.starved <= 2, `bots send an input every tick (starved ${match.starved})`);
+
+  assert.equal(BotsResponse.parse(await (await setBots('eu-2', { count: 0 })).json()).bots, 0);
+  const after = await getJson(`${base}/api/stats`, StatsSchema);
+  assert.equal(
+    after.matches.find((m) => m.room === 'eu-2'),
+    undefined,
+    'empty room → match stopped',
+  );
 });
 
 const ReplaysSchema = z.object({

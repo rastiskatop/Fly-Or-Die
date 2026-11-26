@@ -18,6 +18,7 @@ import type { Input } from '../input.ts';
 import type { Audio } from '../audio/audio.ts';
 import type { Sprites } from '../render/sprites.ts';
 import { el } from '../lobby/lobby-view.ts';
+import { perf, perfExposed } from '../perf.ts';
 
 // Latency presets for the netsim hotkeys 1–4 (Lab 5: "you cannot develop netcode on localhost").
 const PRESETS: readonly NetSimSettings[] = [
@@ -166,6 +167,7 @@ export function playOnlineMatch({
 
   let stepCount = 0;
   function simulate(): void {
+    perf.begin('simulate');
     stepCount++;
     let buttons: number;
     if (flags.autopilot) {
@@ -191,10 +193,12 @@ export function playOnlineMatch({
     net.step(buttons);
     net.sample(performance.now());
     input.consume();
+    perf.end('simulate');
   }
 
   let lastFrame = performance.now();
   function render(alpha: number): void {
+    perf.begin('render');
     const now = performance.now();
     const frameDt = Math.min(0.1, (now - lastFrame) / 1000);
     lastFrame = now;
@@ -218,12 +222,14 @@ export function playOnlineMatch({
       ctx.fillText('waiting for the first snapshot…', bounds.width / 2, bounds.height / 2);
     }
     if (showGraph) drawNetgraph(ctx, net, { netsim, fps: loop.getStats().fps });
+    perf.end('render');
   }
 
-  const loop = createLoop({ step: DT, simulate, render });
+  const loop = createLoop({ step: DT, simulate, render, onFrame: (ms) => perf.frame(ms) });
   setMenuMode(false);
   loop.start();
   if (import.meta.env.DEV) window.net = net; // console access for the defense (net.stats, net.pending, …)
+  if (perfExposed) window.perf = perf; // ?perf=1: the Lab 7 profiler script reads perf.report()
 
   return new Promise((resolve) => {
     window.addEventListener(

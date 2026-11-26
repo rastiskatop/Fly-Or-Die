@@ -1,0 +1,267 @@
+{
+  "label": "probe-why",
+  "environment": {
+    "browser": "157.0.4341.60",
+    "seconds": 30,
+    "bots": 8,
+    "throttle": 1,
+    "room": "eu-2",
+    "spans": false,
+    "heapProfiler": false,
+    "node": "v24.16.0",
+    "platform": "win32"
+  },
+  "frames": {
+    "n": 1804,
+    "p50": 16.700000000000728,
+    "p95": 17.099999999998545,
+    "p99": 17.200000000004366,
+    "max": 50.100000000000364,
+    "mean": 16.728159645232843
+  },
+  "spans": {
+    "simulate": {
+      "n": 0,
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "max": 0,
+      "mean": 0
+    },
+    "render": {
+      "n": 0,
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "max": 0,
+      "mean": 0
+    },
+    "decode": {
+      "n": 0,
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "max": 0,
+      "mean": 0
+    },
+    "reconcile": {
+      "n": 0,
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "max": 0,
+      "mean": 0
+    }
+  },
+  "gc": {
+    "minor": {
+      "count": 13,
+      "totalMs": 12.7,
+      "maxMs": 1.56
+    },
+    "major": {
+      "count": 9,
+      "totalMs": 27.8,
+      "maxMs": 6.39
+    },
+    "majorDetails": [
+      {
+        "ms": 6.39,
+        "type": "finalize incremental marking via task",
+        "usedHeapSizeAfter": 3776604,
+        "usedHeapSizeBefore": 8188180
+      },
+      {
+        "ms": 2.57,
+        "type": "finalize incremental marking via task",
+        "usedHeapSizeAfter": 3797360,
+        "usedHeapSizeBefore": 4607024
+      },
+      {
+        "ms": 2.42,
+        "type": "finalize incremental marking via task",
+        "usedHeapSizeAfter": 3805080,
+        "usedHeapSizeBefore": 4915436
+      },
+      {
+        "ms": 2.44,
+        "type": "finalize incremental marking via task",
+        "usedHeapSizeAfter": 3825860,
+        "usedHeapSizeBefore": 4459744
+      },
+      {
+        "ms": 2.45,
+        "type": "finalize incremental marking via task",
+        "usedHeapSizeAfter": 3831912,
+        "usedHeapSizeBefore": 4659544
+      },
+      {
+        "ms": 2.77,
+        "type": "finalize incremental marking via task",
+        "usedHeapSizeAfter": 3829668,
+        "usedHeapSizeBefore": 5471656
+      },
+      {
+        "ms": 3.15,
+        "type": "finalize incremental marking via task",
+        "usedHeapSizeAfter": 3846136,
+        "usedHeapSizeBefore": 4433192
+      },
+      {
+        "ms": 2.73,
+        "type": "finalize incremental marking via task",
+        "usedHeapSizeAfter": 3838404,
+        "usedHeapSizeBefore": 4231264
+      },
+      {
+        "ms": 2.89,
+        "type": "finalize incremental marking via task",
+        "usedHeapSizeAfter": 3845204,
+        "usedHeapSizeBefore": 5414972
+      }
+    ],
+    "eventNames": {
+      "V8.GC_TIME_TO_SAFEPOINT": 34,
+      "V8.GC_HEAP_ENSURE_SWEEPING_COMPLETED": 33,
+      "V8.GC_HEAP_EXTERNAL_PROLOGUE": 22,
+      "MinorGC": 13,
+      "V8.GC_HEAP_PROLOGUE": 22,
+      "V8.GC_SCAVENGER": 13,
+      "V8.GC_HEAP_PROLOGUE_SAFEPOINT": 22,
+      "V8.GC_SCAVENGER_SCAVENGE": 13,
+      "V8.GC_SCAVENGER_SCAVENGE_WEAK_GLOBAL_HANDLES_IDENTIFY": 13,
+      "V8.GC_SCAVENGER_TRACED_HANDLES_COMPUTE_WEAKNESS_PARALLEL": 13,
+      "V8.GC_SCAVENGER_BACKGROUND_TRACED_HANDLES_COMPUTE_WEAKNESS_PARALLEL": 14,
+      "V8.GC_SCAVENGER_SCAVENGE_COLLECT_OLD_TO_NEW_PAGES": 13,
+      "V8.GC_SCAVENGER_SCAVENGE_PARALLEL_PHASE": 13,
+      "V8.GC_SCAVENGER_SCAVENGE_ROOTS": 13,
+      "V8.GC_SCAVENGER_BACKGROUND_SCAVENGE_PARALLEL": 13,
+      "V8.GC_SCAVENGER_SCAVENGE_WEAK_GLOBAL_HANDLES_PROCESS": 13,
+      "V8.GC_SCAVENGER_TRACED_HANDLES_RESET_PARALLEL": 13,
+      "V8.GC_SCAVENGER_BACKGROUND_TRACED_HANDLES_RESET_PARALLEL": 14,
+      "V8.GC_SCAVENGER_SCAVENGE_FINALIZE": 13,
+      "V8.GC_SCAVENGER_SCAVENGE_RESTORE_AND_QUARANTINE_PINNED": 13,
+      "V8.GC_SCAVENGER_FREE_REMEMBERED_SET": 13,
+      "V8.GC_SCAVENGER_SWEEP_ARRAY_BUFFERS": 13,
+      "V8.GC_SCAVENGER_RESIZE_NEW_SPACE": 13,
+      "V8.GC_MINOR_MS_BACKGROUND_SWEEPING": 13,
+      "V8.GC_BACKGROUND_YOUNG_ARRAY_BUFFER_SWEEP": 13,
+      "V8.GC_HEAP_EPILOGUE_SAFEPOINT": 22,
+      "V8.GC_HEAP_EPILOGUE": 22,
+      "V8.GC_HEAP_DUMP_STATISTICS": 9,
+      "V8.GC_HEAP_EXTERNAL_EPILOGUE": 22,
+      "V8.GC_MC_INCREMENTAL_START": 9,
+      "V8.GC_MC_INCREMENTAL_EXTERNAL_PROLOGUE": 9,
+      "V8.GC_MC_MARK_EMBEDDER_PROLOGUE": 18,
+      "V8.GC_MC_MARK_ROOTS": 27,
+      "V8.GC_MC_BACKGROUND_MARKING": 16,
+      "V8.GC_MC_INCREMENTAL_EXTERNAL_EPILOGUE": 9,
+      "V8.GC_MC_INCREMENTAL": 339,
+      "V8.GC_MC_INCREMENTAL_EMBEDDER_TRACING": 339,
+      "MajorGC": 9,
+      "V8.GC_MARK_COMPACTOR": 9,
+      "V8.GC_MC_PROLOGUE": 9,
+      "V8.GC_MC_MARK": 9,
+      "V8.GC_MC_MARK_FINISH_INCREMENTAL": 9,
+      "V8.GC_MC_MARK_CLIENT_HEAPS": 9,
+      "V8.GC_MC_MARK_RETAIN_MAPS": 9,
+      "V8.GC_MC_MARK_FULL_CLOSURE_PARALLEL": 9,
+      "V8.GCMarkTransitiveClosureFixpoint": 29,
+      "V8.GC_MC_MARK_WEAK_CLOSURE_EPHEMERON_MARKING": 29,
+      "V8.GCReachTransitiveClosureWithEmbedder": 29,
+      "V8.GC_MC_MARK_EMBEDDER_TRACING": 29,
+      "V8.GC_CONSERVATIVE_STACK_SCANNING": 9,
+      "V8.GC_MC_MARK_FULL_CLOSURE_SERIAL": 9,
+      "V8.GC_MC_CLEAR": 9,
+      "V8.GC_MC_CLEAR_JOIN_JOB": 9,
+      "V8.GC_MC_CLEAR_WEAK_COLLECTIONS": 9,
+      "V8.GC_MC_CLEAR_SWEEP_WASM_CODE_POINTER_TABLE": 9,
+      "V8.GC_MC_CLEAR_MAPS": 9,
+      "V8.GC_MC_CLEAR_WEAK_LISTS": 9,
+      "V8.GC_MC_CLEAR_FLUSHED_JS_FUNCTIONS": 9,
+      "V8.GC_MC_CLEAR_JS_WEAK_REFERENCES": 9,
+      "V8.GC_MC_CLEAR_WEAK_GLOBAL_HANDLES": 9,
+      "V8.GC_MC_CLEAR_EXTERNAL_STRING_TABLE": 9,
+      "V8.GC_MC_CLEAR_SWEEP_JS_DISPATCH_TABLE": 9,
+      "V8.GC_MC_CLEAR_STRING_TABLE": 72,
+      "V8.GC_MC_CLEAR_FLUSHABLE_BYTECODE": 9,
+      "V8.GC_MC_CLEAR_SWEEP_TRUSTED_POINTER_TABLE": 9,
+      "V8.GC_MC_CLEAR_WEAK_REFERENCES_NON_TRIVIAL": 9,
+      "V8.GC_MC_CLEAR_WEAK_REFERENCES_TRUSTED": 9,
+      "V8.GC_MC_CLEAR_WEAK_REFERENCES_TRIVIAL": 9,
+      "V8.GC_MC_CLEAR_SWEEP_EXTERNAL_POINTER_TABLE": 9,
+      "V8.GC_MC_SWEEP": 35,
+      "V8.GC_MC_EVACUATE": 18,
+      "V8.GC_MC_EVACUATE_PROLOGUE": 9,
+      "V8.GC_MC_EVACUATE_COPY": 9,
+      "V8.GC_MC_EVACUATE_COPY_PARALLEL": 9,
+      "V8.GC_MC_BACKGROUND_EVACUATE_COPY": 4,
+      "V8.GC_MC_BACKGROUND_SWEEPING": 47,
+      "V8.GC_MC_EVACUATE_UPDATE_POINTERS": 9,
+      "V8.GC_MC_EVACUATE_UPDATE_POINTERS_TO_NEW_ROOTS": 9,
+      "V8.GC_MC_EVACUATE_UPDATE_POINTERS_CLIENT_HEAPS": 9,
+      "V8.GC_MC_EVACUATE_UPDATE_POINTERS_SLOTS_MAIN": 9,
+      "V8.GC_MC_EVACUATE_UPDATE_POINTERS_PARALLEL": 9,
+      "V8.GC_MC_BACKGROUND_EVACUATE_UPDATE_POINTERS": 27,
+      "V8.GC_MC_EVACUATE_UPDATE_POINTERS_WEAK": 9,
+      "V8.GC_MC_EVACUATE_UPDATE_POINTERS_POINTER_TABLES": 9,
+      "V8.GC_MC_EVACUATE_CLEAN_UP": 9,
+      "V8.GC_MC_EVACUATE_EPILOGUE": 9,
+      "V8.GC_MC_SWEEP_NEW_LO": 9,
+      "V8.GC_MC_EVACUATE_REBALANCE": 9,
+      "V8.GC_MC_FINISH": 9,
+      "V8.GC_MC_FINISH_SWEEP_ARRAY_BUFFERS": 9,
+      "V8.GC_MC_SWEEP_START_JOBS": 9,
+      "V8.GC_BACKGROUND_FULL_ARRAY_BUFFER_SWEEP": 9,
+      "V8.GC_MC_EPILOGUE": 9,
+      "V8.GC_HEAP_EXTERNAL_WEAK_GLOBAL_HANDLES": 9,
+      "V8.GC_HEAP_EMBEDDER_TRACING_EPILOGUE": 9,
+      "V8.GC_HEAP_EXTERNAL_SECOND_PASS_CALLBACKS": 9,
+      "V8.GC_MC_COMPLETE_SWEEPING": 8
+    },
+    "traceEvents": 86506
+  },
+  "topSelf": [
+    {
+      "fn": "drawImage",
+      "selfMs": 2879.7971285622802,
+      "pct": 9.572126160742876
+    },
+    {
+      "fn": "fillText",
+      "selfMs": 177.01450048030742,
+      "pct": 0.5883765609990393
+    },
+    {
+      "fn": "save",
+      "selfMs": 119.21384726224785,
+      "pct": 0.3962536023054755
+    },
+    {
+      "fn": "draw (index-DQnvdqia.js:8257)",
+      "selfMs": 103.55950368235672,
+      "pct": 0.3442203009926353
+    },
+    {
+      "fn": "fillRect",
+      "selfMs": 86.09888968940123,
+      "pct": 0.2861831572206212
+    },
+    {
+      "fn": "(garbage collector)",
+      "selfMs": 82.48634886327251,
+      "pct": 0.27417547230227346
+    },
+    {
+      "fn": "decodeSnapshot$1 (index-DQnvdqia.js:10351)",
+      "selfMs": 72.25081652257445,
+      "pct": 0.24015369836695485
+    },
+    {
+      "fn": "restore",
+      "selfMs": 68.03618555875761,
+      "pct": 0.2261447326288825
+    }
+  ],
+  "topAllocators": []
+}

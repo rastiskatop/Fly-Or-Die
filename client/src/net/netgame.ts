@@ -1,7 +1,9 @@
 import { Vector2 } from '@flyordie/shared/sim/vector.ts';
+import { reconcile } from './reconcile.ts';
+import { RemoteViews, createDrawLists, clearDrawLists, type DrawLists } from './remote-views.ts';
+import { perf } from '../perf.ts';
 import { World } from '@flyordie/shared/sim/world.ts';
 import { Explosion } from '@flyordie/shared/sim/explosion.ts';
-import { ASTEROID_RADIUS } from '@flyordie/shared/sim/asteroid.ts';
 import {
   stepShipMotion,
   FIRE_COOLDOWN_S,
@@ -20,7 +22,8 @@ import {
   type ShipState,
   type Snapshot,
 } from '@flyordie/shared/net/protocol.ts';
-import { binaryCodec, codecFor, type AnyCodec } from '@flyordie/shared/net/codec.ts';
+import { codecFor, type AnyCodec } from '@flyordie/shared/net/codec.ts';
+import { decodeSnapshot, SnapshotPool } from '@flyordie/shared/net/codec-binary.ts';
 import type { CodecName, RosterPlayer } from '@flyordie/shared/net/messages.ts';
 import { Bus } from '@flyordie/shared/bus.ts';
 import type { GameEvent, GameEvents } from '@flyordie/shared/sim/events.ts';
@@ -39,12 +42,16 @@ const TICK_MS = 1000 / TICK_RATE;
 const SMOOTH_TAU_S = 0.035; // correction smoothing time constant: ~95% gone after 100 ms
 const TELEPORT_PX = 120; // corrections bigger than this (respawn, wrap) snap instead of smoothing
 const BULLET_TTL = 1.2;
-const MAX_SNAPSHOTS = 60; // 2 s of history at 30 Hz
+// How much history to keep: what the interpolation delay needs, plus a margin for jitter/loss.
+// Lab 7: it was a fixed 60 snapshots (2 s). The young generation here is collected by V8's
+// minor mark-sweep, which PROMOTES whatever is alive at that moment — so every kept snapshot's
+// entity objects went straight to the old generation. Measured as the cause of the major GCs.
+const HISTORY_MARGIN_MS = 150;
+const MIN_SNAPSHOTS = 4;
 
-/** A received snapshot plus what we need to interpolate it. */
+/** A received snapshot plus when it arrived. (No per-snapshot Map: see RemoteViews.) */
 interface SnapSlot extends Snapshot {
   readonly recvAt: number;
-  readonly byId: ReadonlyMap<EntityId, EntityState>;
 }
 
 /**
@@ -135,6 +142,28 @@ export class NetGame {
   smooth = Vector2.ZERO;
   readonly predictedBullets = new Map<Seq, PredictedBullet>();
   readonly pendingEvents: { readonly tick: number; readonly event: GameEvent }[] = [];
+
+  // ---- render path state, reused every frame (Lab 7: no per-frame allocation) ----
+  readonly #remote = new RemoteViews();
+  /** Entity objects of snapshots that left the history, refilled by the next decode (Lab 7). */
+  readonly snapshotPool = new SnapshotPool();
+  readonly #lists: DrawLists = createDrawLists();
+  #selfView:
+    | (Omit<PredictedShip, 'pos' | 'prevPos'> & {
+        pos: { x: number; y: number };
+        prevPos: { x: number; y: number };
+      })
+    | null = null;
+  readonly #selfPos = { x: 0, y: 0 };
+  readonly #selfPrev = { x: 0, y: 0 };
+  /** Our own ship and own predicted bullets are drawn from prediction, not from the snapshot. */
+  readonly #skipPredicted = (e: EntityState): boolean =>
+    this.prediction &&
+    (e.id === this.selfShipId ||
+      (e.kind === 'bullet' &&
+        e.owner === this.selfShipId &&
+        this.predictedBullets.has(e.spawnSeq)));
+  #renderWorld: RenderWorld | null = null; // created on first use (bounds are set in the constructor)
 
   /** Explosions are purely visual: a local World holding only Explosion entities. */
   readonly effects: World;
@@ -242,7 +271,10 @@ export class NetGame {
   receiveBinary(data: ArrayBuffer): void {
     if (this.codec.name !== 'binary') return;
     try {
-      this.receive(binaryCodec.decodeSnapshot(new Uint8Array(data)));
+      perf.begin('decode');
+      const snap = decodeSnapshot(new Uint8Array(data), this.snapshotPool);
+      perf.end('decode');
+      this.receive(snap);
     } catch (err: unknown) {
       console.warn('[net] bad snapshot', err instanceof Error ? err.message : err);
     }
@@ -254,13 +286,17 @@ export class NetGame {
     if (this.latest && snap.tick <= this.latest.tick) return; // late/duplicate
     if (this.latest) this.stats.snapshotsMissed += snap.tick - this.latest.tick - 1;
 
-    const slot: SnapSlot = {
-      ...snap,
-      recvAt: now,
-      byId: new Map(snap.entities.map((e) => [e.id, e])),
-    };
+    const slot: SnapSlot = { ...snap, recvAt: now };
     this.snapshots.push(slot);
-    if (this.snapshots.length > MAX_SNAPSHOTS) this.snapshots.shift();
+    const keep = Math.max(
+      MIN_SNAPSHOTS,
+      Math.ceil((this.interpDelayMs + HISTORY_MARGIN_MS) / TICK_MS),
+    );
+    while (this.snapshots.length > keep) {
+      const old = this.snapshots.shift();
+      // Binary-decoded entities go back to the pool (JSON ones have their own shapes: let them go).
+      if (old && this.codec.name === 'binary') this.snapshotPool.release(old.entities);
+    }
     this.latest = slot;
     this.stats.serverTick = snap.tick;
 
@@ -271,33 +307,31 @@ export class NetGame {
     else this.tickBase += (base - this.tickBase) * 0.02;
 
     for (const event of snap.events) this.pendingEvents.push({ tick: snap.tick, event });
+    perf.begin('reconcile');
     this.#reconcile(slot);
+    perf.end('reconcile');
     this.#confirmBullets(slot);
   }
 
   #reconcile(snap: SnapSlot): void {
-    const server = this.selfShipId === null ? undefined : snap.byId.get(this.selfShipId);
+    let server: EntityState | undefined;
+    for (const e of snap.entities) if (e.id === this.selfShipId) server = e; // once per snapshot
     if (server?.kind !== 'ship') return;
     const me = (this.me ??= makeShip(server));
 
     const before = me.pos;
     applyServerShip(me, server);
-    this.pending = this.pending.filter((i) => i.seq > snap.ack);
-
-    if (this.prediction && !me.destroyed) {
-      // Replay every input the server hasn't processed yet, on top of its authoritative state.
-      for (const input of this.pending) {
-        if (stepShipMotion(me, buttonsToControls(input.buttons), DT, this.bounds))
-          me.fireCooldown = FIRE_COOLDOWN_S;
-      }
-    }
-
-    // How far did the truth move us? 0 = prediction was perfect.
-    let dx = before.x - me.pos.x;
-    let dy = before.y - me.pos.y;
-    dx -= Math.round(dx / this.bounds.width) * this.bounds.width; // through the arena wrap
-    dy -= Math.round(dy / this.bounds.height) * this.bounds.height;
-    const correction = Math.hypot(dx, dy);
+    // Replay every input the server hasn't processed yet, on top of its authoritative state;
+    // the correction says how far the truth moved us (0 = the prediction was perfect).
+    const { pending, dx, dy, correction } = reconcile(
+      me,
+      before,
+      this.pending,
+      snap.ack,
+      this.bounds,
+      this.prediction && !me.destroyed,
+    );
+    this.pending = pending;
     this.stats.lastCorrection = correction;
     this.history.correction.push(correction);
 
@@ -330,30 +364,6 @@ export class NetGame {
   renderTick(now = performance.now()): number {
     if (this.tickBase === null) return 0;
     return (now - this.tickBase) / TICK_MS - this.interpDelayMs / TICK_MS;
-  }
-
-  /** Remote entities at render time (or the raw latest snapshot without interpolation). */
-  #remoteEntities(now: number): EntityState[] {
-    const latest = this.latest;
-    if (!latest) return [];
-    if (!this.interpolation) return [...latest.entities];
-
-    const rt = this.renderTick(now);
-    let a: SnapSlot = this.snapshots[0] ?? latest;
-    let b: SnapSlot = latest;
-    for (let i = this.snapshots.length - 1; i > 0; i--) {
-      const prev = this.snapshots[i - 1];
-      const cur = this.snapshots[i];
-      if (prev && cur && prev.tick <= rt) {
-        a = prev;
-        b = cur;
-        break;
-      }
-    }
-    const t = b.tick === a.tick ? 1 : Math.max(0, Math.min(1, (rt - a.tick) / (b.tick - a.tick)));
-    // Entities in b: blended if they also existed in a; new ones appear at their first position;
-    // entities gone in b simply aren't drawn.
-    return b.entities.map((e) => lerpEntity(a.byId.get(e.id) ?? e, e, t, this.bounds));
   }
 
   /** Dispatch the events whose tick the interpolated picture has reached. */
@@ -405,36 +415,58 @@ export class NetGame {
     }
   }
 
-  /** What drawWorld draws: interpolated remotes + predicted self + predicted bullets + effects. */
+  /**
+   * What drawWorld draws: interpolated remotes + predicted self + predicted bullets + effects.
+   * Allocation-free in steady state (Lab 7): reused view objects and reused per-kind arrays.
+   */
   renderWorld(now = performance.now(), frameDt = 0): RenderWorld {
     this.smooth = this.smooth.scale(Math.exp(-frameDt / SMOOTH_TAU_S));
+    const lists = this.#lists;
+    clearDrawLists(lists);
 
-    const views: Drawable[] = [];
-    for (const e of this.#remoteEntities(now)) {
-      const own = this.prediction && e.id === this.selfShipId;
-      const ownBullet =
-        this.prediction &&
-        e.kind === 'bullet' &&
-        e.owner === this.selfShipId &&
-        this.predictedBullets.has(e.spawnSeq);
-      if (!own && !ownBullet) views.push(toView(e));
+    const latest = this.latest;
+    if (latest) {
+      // The two snapshots around render time (interpolation off: just the latest one).
+      let a: SnapSlot = latest;
+      let b: SnapSlot = latest;
+      let t = 1;
+      if (this.interpolation) {
+        const rt = this.renderTick(now);
+        a = this.snapshots[0] ?? latest;
+        for (let i = this.snapshots.length - 1; i > 0; i--) {
+          const prev = this.snapshots[i - 1];
+          const cur = this.snapshots[i];
+          if (prev && cur && prev.tick <= rt) {
+            a = prev;
+            b = cur;
+            break;
+          }
+        }
+        t = b.tick === a.tick ? 1 : Math.max(0, Math.min(1, (rt - a.tick) / (b.tick - a.tick)));
+      }
+      this.#remote.update(a.entities, b.entities, t, this.bounds, this.#skipPredicted, lists);
     }
+
     const me = this.me;
     if (me && this.prediction) {
-      // the predicted ship, shifted by the decaying correction offset
-      views.push({ ...me, pos: me.pos.add(this.smooth), prevPos: me.prevPos.add(this.smooth) });
+      // the predicted ship, shifted by the decaying correction offset (one reused object)
+      const v = (this.#selfView ??= { ...me, pos: this.#selfPos, prevPos: this.#selfPrev });
+      Object.assign(v, me); // copies the current hp/angle/effects…; pos/prevPos are re-pointed below
+      v.pos = this.#selfPos;
+      v.prevPos = this.#selfPrev;
+      this.#selfPos.x = me.pos.x + this.smooth.x;
+      this.#selfPos.y = me.pos.y + this.smooth.y;
+      this.#selfPrev.x = me.prevPos.x + this.smooth.x;
+      this.#selfPrev.y = me.prevPos.y + this.smooth.y;
+      lists.ship.push(v);
     }
-    if (this.prediction) views.push(...this.predictedBullets.values());
-
-    const effects = this.effects;
-    return {
+    if (this.prediction) for (const b of this.predictedBullets.values()) lists.bullet.push(b);
+    for (const e of this.effects.ofKind('explosion')) lists.explosion.push(e);
+    return (this.#renderWorld ??= {
       width: this.bounds.width,
       height: this.bounds.height,
-      *ofKind(kind: DrawableKind): Generator<Drawable> {
-        if (kind === 'explosion') yield* effects.ofKind('explosion');
-        else for (const v of views) if (v.kind === kind) yield v;
-      },
-    };
+      ofKind: (kind: DrawableKind): readonly Drawable[] => this.#lists[kind],
+    });
   }
 
   /** The predicted ship as a drawable/HUD-able object (null before our first snapshot). */
@@ -515,82 +547,4 @@ function applyServerShip(me: PredictedShip, s: ShipState): void {
   me.fireCooldown = s.fireCooldown;
   me.effects.clear();
   for (const [k, v] of effectsOf(s)) me.effects.set(k, v);
-}
-
-function lerpAngle(a: number, b: number, t: number): number {
-  let d = b - a;
-  d -= Math.round(d / (Math.PI * 2)) * Math.PI * 2;
-  return a + d * t;
-}
-
-/** Blend two states of the same entity. `{ ...b, … }` keeps b's kind, so the union stays intact. */
-function lerpEntity(a: EntityState, b: EntityState, t: number, bounds: Bounds): EntityState {
-  if (a === b || t >= 1) return b;
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  // through the wrap: don't streak across the whole arena
-  if (Math.abs(dx) > bounds.width / 2 || Math.abs(dy) > bounds.height / 2) return b;
-  return { ...b, x: a.x + dx * t, y: a.y + dy * t, angle: lerpAngle(a.angle, b.angle, t) };
-}
-
-const shapeCache = new Map<number, readonly number[]>();
-function rockShape(id: number): readonly number[] {
-  let shape = shapeCache.get(id);
-  if (!shape) {
-    let s = id * 2654435761;
-    shape = Array.from({ length: 11 }, () => {
-      s = (s * 1664525 + 1013904223) >>> 0;
-      return 0.75 + (s / 4294967296) * 0.3;
-    });
-    shapeCache.set(id, shape);
-  }
-  return shape;
-}
-
-/** Snapshot entity → what draw.ts expects. Exhaustive over the snapshot's entity kinds. */
-function toView(e: EntityState): Drawable {
-  const pos = new Vector2(e.x, e.y);
-  const base = { pos, prevPos: pos, angle: e.angle, prevAngle: e.angle, alive: true };
-  switch (e.kind) {
-    case 'ship':
-      return {
-        ...base,
-        kind: 'ship',
-        radius: 18,
-        hp: e.hp,
-        maxHp: 100,
-        destroyed: e.destroyed,
-        thrusting: e.thrusting,
-        hitFlash: e.hitFlash ? 0.1 : 0,
-        invulnerableFor: e.invulnerable,
-        effects: effectsOf(e),
-      };
-    case 'bullet': {
-      const angle = Math.atan2(e.vy, e.vx);
-      return { ...base, kind: 'bullet', fast: e.fast, angle, prevAngle: angle };
-    }
-    case 'asteroid':
-      return {
-        ...base,
-        kind: 'asteroid',
-        id: e.id,
-        radius: ASTEROID_RADIUS[e.size],
-        homing: e.seeker ? true : null,
-        hitFlash: e.hitFlash ? 0.1 : 0,
-        shape: rockShape(e.id),
-      };
-    case 'pickup':
-      return {
-        ...base,
-        kind: 'pickup',
-        radius: 12,
-        pickup: { effect: e.effect },
-        lifetime: 15,
-        age: 15 - e.lifeLeft,
-      };
-    default: {
-      const unreachable: never = e;
-      return unreachable;
-    }
-  }
 }

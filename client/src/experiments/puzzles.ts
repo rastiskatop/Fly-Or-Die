@@ -16,12 +16,13 @@ const puzzles: readonly Puzzle[] = [
     run(log: (x: unknown) => void): void | Promise<unknown> {
       async function f() {
         log('f1');
+        // eslint-disable-next-line @typescript-eslint/await-thenable -- the puzzle: awaiting a non-promise still yields
         await undefined; // the rest of f becomes a microtask
         log('f2');
       }
       log('a');
-      f();
-      Promise.resolve().then(() => log('p'));
+      void f();
+      void Promise.resolve().then(() => log('p'));
       log('b');
     },
   },
@@ -30,7 +31,7 @@ const puzzles: readonly Puzzle[] = [
     expected: 's p1 p2 t1 t2',
     run(log: (x: unknown) => void): void | Promise<unknown> {
       setTimeout(() => log('t1'), 0);
-      Promise.resolve()
+      void Promise.resolve()
         .then(() => {
           log('p1');
           setTimeout(() => log('t2'), 0); // queued AFTER t1, which is already waiting
@@ -57,29 +58,30 @@ const puzzles: readonly Puzzle[] = [
     name: '4. async function returning a promise costs extra ticks',
     expected: 'x1 g x2 h x3',
     run(log: (x: unknown) => void): void | Promise<unknown> {
+      // eslint-disable-next-line @typescript-eslint/require-await -- the puzzle: an async fn returning a plain value
       async function g() {
         return 'g'; // plain value: the async promise is fulfilled immediately
       }
       async function h() {
         return Promise.resolve('h'); // a promise: adopted via an extra then-job → 2 more ticks
       }
-      h().then(log);
-      Promise.resolve()
+      void h().then(log);
+      void Promise.resolve()
         .then(() => log('x1'))
         .then(() => log('x2'))
         .then(() => log('x3'));
-      g().then(log);
+      void g().then(log);
     },
   },
   {
     name: '5. a rejection skips .then, catch/finally interleave with another chain',
     expected: 'ok1 catch:boom ok2 finally ok3',
     run(log: (x: unknown) => void): void | Promise<unknown> {
-      Promise.reject(new Error('boom'))
+      void Promise.reject(new Error('boom'))
         .then(() => log('then')) // skipped, but still takes one microtask to pass the rejection on
-        .catch((e) => log(`catch:${e.message}`))
+        .catch((e: unknown) => log(`catch:${e instanceof Error ? e.message : '?'}`))
         .finally(() => log('finally'));
-      Promise.resolve()
+      void Promise.resolve()
         .then(() => log('ok1'))
         .then(() => log('ok2'))
         .then(() => log('ok3'));

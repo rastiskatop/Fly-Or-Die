@@ -63,17 +63,23 @@ export async function fetchJson(url: string, options?: RequestOptions): Promise<
   }
 }
 
+/** `signal.reason` is typed `any` and can be anything abort() was called with: always reject with an Error. */
+function abortReason(signal: AbortSignal | undefined): Error {
+  const reason: unknown = signal?.reason;
+  return reason instanceof Error ? reason : new DOMException('Aborted', 'AbortError');
+}
+
 /** Promise-based, abortable setTimeout. */
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
-    if (signal?.aborted) return reject(signal.reason);
+    if (signal?.aborted) return reject(abortReason(signal));
     const id = setTimeout(() => {
       signal?.removeEventListener('abort', onAbort);
       resolve();
     }, ms);
     function onAbort(): void {
       clearTimeout(id);
-      reject(signal?.reason);
+      reject(abortReason(signal));
     }
     signal?.addEventListener('abort', onAbort, { once: true });
   });
@@ -136,7 +142,8 @@ export function describeError(err: unknown): string {
   if (err instanceof SyntaxError) return 'corrupt JSON';
   if (err instanceof TypeError) return 'network error';
   if (name === 'EncodingError') return 'cannot decode';
-  return err instanceof Error ? err.message || err.name : String(err);
+  if (err instanceof Error) return err.message || err.name;
+  return typeof err === 'string' ? err : 'unknown error'; // String({}) would say "[object Object]"
 }
 
 /**

@@ -82,30 +82,30 @@ export function showLobby(
   serverBadge.className = lobby.online ? 'online' : 'offline';
   const createForm = el(root, '#create-room', HTMLFormElement);
   createForm.hidden = !lobby.online;
-  createForm.addEventListener(
-    'submit',
-    async (e) => {
-      e.preventDefault();
-      const nameField = el(createForm, '#new-room-name', HTMLInputElement);
-      const button = el(createForm, 'button', HTMLButtonElement);
-      button.disabled = true;
-      try {
-        const room = await lobby.createRoom({
-          name: nameField.value,
-          arena: el(createForm, '#new-room-arena', HTMLSelectElement).value,
-        });
-        nameField.value = '';
-        errorBox.hidden = true;
-        updateStatus(`created "${room.name}"`);
-      } catch (err: unknown) {
-        errorBox.hidden = false;
-        errorBox.textContent = `Could not create room: ${message(err)}`;
-      } finally {
-        button.disabled = false;
-      }
-    },
-    { signal },
-  );
+  // addEventListener ignores what a listener returns: an async listener's promise would float.
+  // createRoom catches everything itself, and `void` marks the fire-and-forget on purpose.
+  createForm.addEventListener('submit', (e) => void createRoom(e), { signal });
+
+  async function createRoom(e: SubmitEvent): Promise<void> {
+    e.preventDefault();
+    const nameField = el(createForm, '#new-room-name', HTMLInputElement);
+    const button = el(createForm, 'button', HTMLButtonElement);
+    button.disabled = true;
+    try {
+      const room = await lobby.createRoom({
+        name: nameField.value,
+        arena: el(createForm, '#new-room-arena', HTMLSelectElement).value,
+      });
+      nameField.value = '';
+      errorBox.hidden = true;
+      updateStatus(`created "${room.name}"`);
+    } catch (err: unknown) {
+      errorBox.hidden = false;
+      errorBox.textContent = `Could not create room: ${message(err)}`;
+    } finally {
+      button.disabled = false;
+    }
+  }
 
   // Rows are keyed by room id and UPDATED in place on every refresh. Re-creating them every 3 s
   // would swap the button under the cursor: a click whose mousedown and mouseup land on

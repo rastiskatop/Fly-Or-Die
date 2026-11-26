@@ -11,6 +11,8 @@ import { sendError } from './http/respond.ts';
 import { attachWebSockets } from './ws.ts';
 import { log } from './logger.ts';
 import { Match } from './match.ts';
+import { BotManager } from './bots.ts';
+import { performance } from 'node:perf_hooks'; // Node's (with eventLoopUtilization), not the DOM type
 import { DEFAULT_ARENA } from '@flyordie/shared/sim/game.ts';
 import { ArenaSchema, type ArenaRules } from '@flyordie/shared/sim/arena.ts';
 
@@ -88,24 +90,51 @@ rooms.on('roomCreated', (room) => {
     log.info('match log started', { room: room.id, file: matchLog.id });
     matchLog.done
       .then(() => log.info('match log closed', { room: room.id, file: matchLog.id }))
-      .catch((err) => log.error('match log failed', { room: room.id, err: err.message }))
+      .catch((err: unknown) =>
+        log.error('match log failed', { room: room.id, err: errorMessage(err) }),
+      )
       .finally(() => openLogs.delete(matchLog.done));
   });
 });
 
 // ---------- HTTP ----------
 const serveStatic = createStaticHandler(config.staticDir);
+// ---------- bots (Lab 7): AI pilots that use the same input path as players ----------
+const bots = new BotManager();
+
+// Event-loop utilization since the last /api/stats call: 0 = idle, 1 = never yielding.
+let lastElu = performance.eventLoopUtilization();
+
 const handleApi = createApiHandler({
   config,
   rooms,
   stats,
-  netStats: () => ({
-    matches: [...matches.values()].map((m) => m.statsJSON()),
-    connections: sockets.connectionStats(),
-  }),
+  setBots: (roomId, count) => {
+    const room = rooms.get(roomId);
+    if (!room) return null;
+    return bots.setCount(room, () => matches.get(room.id), count);
+  },
+  netStats: () => {
+    const elu = performance.eventLoopUtilization(lastElu);
+    lastElu = performance.eventLoopUtilization();
+    const mem = process.memoryUsage();
+    return {
+      matches: [...matches.values()].map((m) => m.statsJSON()),
+      connections: sockets.connectionStats(),
+      process: {
+        eventLoopUtilization: Math.round(elu.utilization * 1000) / 1000,
+        rssMB: Math.round(mem.rss / 2 ** 17) / 8,
+        heapUsedMB: Math.round(mem.heapUsed / 2 ** 17) / 8,
+      },
+    };
+  },
 });
 
-const server = http.createServer(async (req, res) => {
+// node:http ignores a handler's return value: an async handler's rejection would be unhandled
+// (and crash the process). handleRequest catches everything itself; `void` says so explicitly.
+const server = http.createServer((req, res) => void handleRequest(req, res));
+
+async function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost'); // req.url is only the path + query
   try {
     if (await handleApi(req, res, url)) return;
@@ -115,7 +144,7 @@ const server = http.createServer(async (req, res) => {
     log.error('request failed', { path: url.pathname, err: errorMessage(err) });
     if (!res.headersSent) sendError(res, 500, 'internal error');
   }
-});
+}
 server.on('clientError', (err, socket) => socket.end('HTTP/1.1 400 Bad Request\r\n\r\n'));
 
 // ---------- WebSocket on /ws (same port: HTTP Upgrade) ----------

@@ -1,12 +1,13 @@
 {
   "name": "@flyordie/client",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "test": "vitest run",
     "gen:assets": "node tools/gen-sprites.ts && node tools/gen-sounds.ts",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json"
   },

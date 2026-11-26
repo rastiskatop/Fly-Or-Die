@@ -29,3 +29,11 @@ dist-ssr
 # server match logs
 server/logs/
 .env
+
+# test output (Lab 7)
+coverage/
+playwright-report/
+test-results/
+*.cpuprofile
+*.heapprofile
+client/dist-profile/

@@ -7,11 +7,46 @@ export interface Particle {
   y: number;
   vx: number;
   vy: number;
-  readonly size: number;
+  size: number;
 }
 
-// A short-lived cloud of particles. Particles are plain objects allocated per explosion —
-// many short-lived allocations on purpose: this is the GC pressure we'll measure and pool in Lab 7.
+// ---------- particle pool (Lab 7) ----------
+// A ship explosion is 60 particles that live ~0.9 s: long enough to survive a scavenge or two and
+// get promoted, so they ended up in the OLD generation (major GC work) — the textbook case for a
+// pool (Nystrom, "Object Pool"). Particles are recycled through a free list instead of `new`.
+// Bounded, so a burst of explosions can't pin memory forever. The random numbers are drawn exactly
+// as before, so the simulation (and its determinism hash) is unchanged.
+const MAX_POOLED = 4096;
+const free: Particle[] = [];
+export const particlePool = {
+  created: 0,
+  reused: 0,
+  get available(): number {
+    return free.length;
+  },
+};
+
+function acquireParticle(vx: number, vy: number, size: number): Particle {
+  const p = free.pop();
+  if (!p) {
+    particlePool.created++;
+    return { x: 0, y: 0, vx, vy, size }; // always this field order → one hidden class
+  }
+  particlePool.reused++;
+  p.x = 0;
+  p.y = 0;
+  p.vx = vx;
+  p.vy = vy;
+  p.size = size;
+  return p;
+}
+
+function releaseParticles(list: Particle[]): void {
+  for (const p of list) if (free.length < MAX_POOLED) free.push(p);
+  list.length = 0;
+}
+
+// A short-lived cloud of particles; the particle objects come from the pool above.
 export class Explosion extends Entity<'explosion'> {
   ttl: number;
   readonly maxTtl: number;
@@ -47,7 +82,7 @@ export class Explosion extends Entity<'explosion'> {
     for (let i = 0; i < count; i++) {
       const a = rng() * Math.PI * 2;
       const s = speed * (0.3 + rng() * 0.7);
-      this.particles.push({ x: 0, y: 0, vx: dcos(a) * s, vy: dsin(a) * s, size: 1 + rng() * 2.5 });
+      this.particles.push(acquireParticle(dcos(a) * s, dsin(a) * s, 1 + rng() * 2.5));
     }
   }
 
@@ -61,6 +96,9 @@ export class Explosion extends Entity<'explosion'> {
       p.vy *= drag;
     }
     this.ttl -= dt;
-    if (this.ttl <= 0) world.despawn(this.id);
+    if (this.ttl <= 0) {
+      releaseParticles(this.particles); // back to the pool; nothing draws a dead explosion's particles
+      world.despawn(this.id);
+    }
   }
 }

@@ -3,6 +3,7 @@ import type { IncomingMessage } from 'node:http';
 import { WebSocket, type RawData, type WebSocketServer } from 'ws';
 import { parseFrame, serverMessage, CLOSE } from './protocol.ts';
 import { TokenBucket } from './rate-limit.ts';
+import { startHeartbeat } from './heartbeat.ts';
 import { log } from './logger.ts';
 import { TICK_RATE } from '@flyordie/shared/net/protocol.ts';
 import { binaryCodec, jsonCodec } from '@flyordie/shared/net/codec.ts';
@@ -50,7 +51,7 @@ interface SendOptions {
 }
 
 /** ws hands us Buffer | ArrayBuffer | Buffer[] depending on settings — normalize once. */
-function toBuffer(data: RawData): Buffer {
+export function toBuffer(data: RawData): Buffer {
   if (Buffer.isBuffer(data)) return data;
   if (Array.isArray(data)) return Buffer.concat(data);
   return Buffer.from(data);
@@ -338,20 +339,13 @@ export function attachWebSockets(
 
   // ---------- heartbeat ----------
   // Dead TCP connections never send a close frame. Ping/pong finds them; 2 missed pongs → terminate.
-  const heartbeat = setInterval(() => {
-    for (const socket of wss.clients) {
-      const state = states.get(socket);
-      if (!state) continue;
-      if (state.missedPongs >= 2) {
-        log.warn('heartbeat: terminating dead socket', { id: state.id });
-        socket.terminate();
-        continue;
-      }
-      state.missedPongs++;
-      socket.ping();
-    }
-  }, config.heartbeatMs);
-  heartbeat.unref();
+  const stopHeartbeat = startHeartbeat({
+    intervalMs: config.heartbeatMs,
+    sockets: () => wss.clients,
+    stateOf: (socket) => states.get(socket),
+    onDead: (socket) =>
+      log.warn('heartbeat: terminating dead socket', { id: states.get(socket)?.id }),
+  });
 
   return {
     wireMatch,
@@ -377,7 +371,7 @@ export function attachWebSockets(
 
     /** Graceful shutdown: tell every client we're going away (1001). Resolves when all closed. */
     closeAll(): Promise<void[]> {
-      clearInterval(heartbeat);
+      stopHeartbeat();
       const closed = [...wss.clients].map(
         (socket) =>
           new Promise<void>((resolve) => {

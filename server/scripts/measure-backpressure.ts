@@ -56,7 +56,7 @@ async function run(label: Mode, path: string): Promise<Run> {
   const samples: Sample[] = [];
   const t0 = performance.now();
   const { sink, received } = throttledSink();
-  const sampler = setInterval(async () => {
+  const sample = async (): Promise<void> => {
     try {
       const h = await health(base);
       samples.push({
@@ -67,7 +67,8 @@ async function run(label: Mode, path: string): Promise<Run> {
     } catch {
       /* server busy */
     }
-  }, 250);
+  };
+  const sampler = setInterval(() => void sample(), 250);
 
   await new Promise<void>((resolve, reject) => {
     http

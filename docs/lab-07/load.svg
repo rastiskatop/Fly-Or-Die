@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 380" width="760" height="380" font-family="system-ui, sans-serif" font-size="12" fill="#374151">
+<rect width="100%" height="100%" fill="#fff"/>
+<text x="58" y="22" font-size="14" font-weight="600">Server load test — N headless clients, 8 per room, 30 Hz inputs</text>
+<line x1="58" x2="700" y1="94" y2="94" stroke="#d64545" stroke-dasharray="6 4"/>
+<text x="696" y="88" text-anchor="end" fill="#d64545">tick budget 33.3 ms</text>
+<polyline fill="none" stroke="#1f6feb" stroke-width="2.5" points="272.0,299.9 414.7,305.2 486.0,307.8 557.3,314.0 628.7,314.6 700.0,318.2"/><circle cx="272.0" cy="299.9" r="3.5" fill="#1f6feb"/><circle cx="414.7" cy="305.2" r="3.5" fill="#1f6feb"/><circle cx="486.0" cy="307.8" r="3.5" fill="#1f6feb"/><circle cx="557.3" cy="314.0" r="3.5" fill="#1f6feb"/><circle cx="628.7" cy="314.6" r="3.5" fill="#1f6feb"/><circle cx="700.0" cy="318.2" r="3.5" fill="#1f6feb"/>
+<polyline fill="none" stroke="#e8a33d" stroke-width="2.5" points="272.0,308.9 414.7,274.4 486.0,242.7 557.3,177.0 628.7,65.9 700.0,46.0"/><circle cx="272.0" cy="308.9" r="3.5" fill="#e8a33d"/><circle cx="414.7" cy="274.4" r="3.5" fill="#e8a33d"/><circle cx="486.0" cy="242.7" r="3.5" fill="#e8a33d"/><circle cx="557.3" cy="177.0" r="3.5" fill="#e8a33d"/><circle cx="628.7" cy="65.9" r="3.5" fill="#e8a33d"/><circle cx="700.0" cy="46.0" r="3.5" fill="#e8a33d"/>
+<text x="272.0" y="352" text-anchor="middle">8</text><text x="414.7" y="352" text-anchor="middle">32</text><text x="486.0" y="352" text-anchor="middle">64</text><text x="557.3" y="352" text-anchor="middle">128</text><text x="628.7" y="352" text-anchor="middle">256</text><text x="700.0" y="352" text-anchor="middle">512</text>
+<text x="379" y="372" text-anchor="middle">clients N (log scale)</text>
+<text x="16" y="190" transform="rotate(-90 16 190)" text-anchor="middle" fill="#1f6feb">worst room tick p99, ms</text>
+<text x="746" y="190" transform="rotate(90 746 190)" text-anchor="middle" fill="#e8a33d">event-loop utilization (0–1)</text>
+<line x1="557.3333333333333" x2="557.3333333333333" y1="46" y2="334" stroke="#1f9d55" stroke-width="1.5"/><text x="562.3333333333333" y="58" fill="#1f9d55">capacity N = 128</text>
+</svg>

@@ -68,5 +68,6 @@ export type DrawableKind = Drawable['kind'];
 export interface RenderWorld {
   readonly width: number;
   readonly height: number;
-  ofKind(kind: DrawableKind): Iterable<Drawable>;
+  /** A plain array (not any Iterable): the draw loop stays monomorphic and allocation-free. */
+  ofKind(kind: DrawableKind): readonly Drawable[];
 }

@@ -7,6 +7,7 @@ import type { ArenaRules } from '@flyordie/shared/sim/arena.ts';
 import type { RoomInfo } from '@flyordie/shared/net/messages.ts';
 import { setupCanvas } from './render/canvas.ts';
 import { drawWorld } from './render/draw.ts';
+import { createWorldView } from './render/world-view.ts';
 import { createBattlefield } from './render/battlefield.ts';
 import { createMenuBackground } from './render/menu-bg.ts';
 import { createHud } from './render/hud.ts';
@@ -41,7 +42,7 @@ const flags = readDebugFlags();
 const netFlags = readNetFlags();
 const { ctx } = setupCanvas('gameCanvas', bounds);
 const input = createInput(window);
-const audio = createAudio();
+const audio = createAudio({ enabled: new URLSearchParams(location.search).get('sound') !== '0' });
 const menuBg = createMenuBackground(el(document, '#menu-bg', HTMLCanvasElement));
 
 // Menus (loading + lobby) sit on the animated war backdrop; a match hides it.
@@ -175,6 +176,7 @@ function playOfflineMatch(room: RoomInfo, name: string, assets: GameAssets): Pro
     seed: arena.seed,
   });
   let lastFrame = performance.now() / 1000;
+  const view = createWorldView(world); // reused draw lists (Lab 7)
 
   function simulate(dt: number): void {
     const controls = {
@@ -191,7 +193,8 @@ function playOfflineMatch(room: RoomInfo, name: string, assets: GameAssets): Pro
     const time = performance.now() / 1000;
     battlefield.draw(ctx, time, Math.min(0.1, time - lastFrame));
     lastFrame = time;
-    drawWorld(ctx, world, alpha, time, assets.sprites);
+    view.refresh();
+    drawWorld(ctx, view, alpha, time, assets.sprites);
     hud.draw(ctx, {
       stats: loop.getStats(),
       player,

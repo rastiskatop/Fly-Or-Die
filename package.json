@@ -1,6 +1,6 @@
 {
   "name": "flyordie",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -17,20 +17,26 @@
     "dev:server": "npm run dev -w server",
     "build": "npm run build -w client",
     "start": "npm run build && npm run start -w server",
-    "test": "npm test --workspaces --if-present",
+    "test": "vitest run",
+    "coverage": "vitest run --coverage",
+    "e2e": "playwright test",
     "lint": "eslint .",
-    "format": "prettier --write shared client/src client/tools client/index.html client/duel.html client/vite.config.ts server scripts",
+    "format": "prettier --write shared client/src client/test client/tools client/index.html client/duel.html client/worker-bench.html client/vite.config.ts client/vitest.config.ts server scripts e2e vitest.config.ts playwright.config.ts .github",
     "typecheck": "tsc -p tsconfig.json && npm run typecheck --workspaces"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.65.1",
     "@types/node": "^24.19.4",
     "@types/ws": "^8.18.2",
+    "@vitest/coverage-v8": "^5.1.2",
     "eslint": "^10.15.0",
     "eslint-config-prettier": "^10.1.8",
+    "fast-check": "^4.11.0",
     "globals": "^17.14.0",
     "prettier": "^3.10.1",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.74.0"
+    "typescript-eslint": "^8.74.0",
+    "vitest": "^5.1.2"
   }
 }

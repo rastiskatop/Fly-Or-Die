@@ -14,10 +14,13 @@ export function createLoop({
   step = 1 / 60,
   simulate,
   render,
+  onFrame,
 }: {
   step?: number;
   simulate: (dt: number) => void;
   render: (alpha: number) => void;
+  /** Gets every frame's time in ms (Lab 7: frame-time percentiles). */
+  onFrame?: (frameMs: number) => void;
 }): Loop {
   let last = performance.now();
   let accumulator = 0;
@@ -31,6 +34,7 @@ export function createLoop({
 
   function frame(now: number): void {
     stats.frameTime = now - last;
+    onFrame?.(stats.frameTime);
     const dt = (now - last) / 1000;
     last = now;
 

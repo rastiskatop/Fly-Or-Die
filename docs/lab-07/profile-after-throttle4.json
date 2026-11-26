@@ -1,0 +1,298 @@
+{
+  "label": "after-throttle4",
+  "environment": {
+    "browser": "157.0.4341.60",
+    "seconds": 30,
+    "bots": 8,
+    "throttle": 4,
+    "room": "eu-2",
+    "spans": true,
+    "heapProfiler": true,
+    "sound": true,
+    "jsFlags": "",
+    "node": "v24.16.0",
+    "platform": "win32"
+  },
+  "frames": {
+    "n": 1799,
+    "p50": 16.700000000000728,
+    "p95": 16.900000000001455,
+    "p99": 17,
+    "max": 233.30000000000018,
+    "mean": 16.87654252362428
+  },
+  "slowFrames": 6,
+  "spans": {
+    "simulate": {
+      "n": 911,
+      "p50": 0.8000000715255737,
+      "p95": 1.2999999523162842,
+      "p99": 1.6999999284744263,
+      "max": 3.100000023841858,
+      "mean": 0.8721185509119547
+    },
+    "render": {
+      "n": 1799,
+      "p50": 2.9000000953674316,
+      "p95": 4.299999952316284,
+      "p99": 6.100000023841858,
+      "max": 12.100000023841858,
+      "mean": 3.0378543632172295
+    },
+    "decode": {
+      "n": 910,
+      "p50": 0.20000004768371582,
+      "p95": 0.40000009536743164,
+      "p99": 1,
+      "max": 2.5,
+      "mean": 0.24076923105742906
+    },
+    "reconcile": {
+      "n": 910,
+      "p50": 0.19999992847442627,
+      "p95": 0.3999999761581421,
+      "p99": 0.6000000238418579,
+      "max": 1.2999999523162842,
+      "mean": 0.17197802446700713
+    }
+  },
+  "gc": {
+    "minor": {
+      "count": 13,
+      "totalMs": 41.2,
+      "maxMs": 6.03
+    },
+    "major": {
+      "count": 8,
+      "totalMs": 110.6,
+      "maxMs": 33.88
+    },
+    "majorDetails": [
+      {
+        "ms": 33.88,
+        "type": "finalize incremental marking via task",
+        "usedHeapSizeAfter": 4137280,
+        "usedHeapSizeBefore": 6750924
+      },
+      {
+        "ms": 11.2,
+        "type": "finalize incremental marking via task",
+        "usedHeapSizeAfter": 4119672,
+        "usedHeapSizeBefore": 5709304
+      },
+      {
+        "ms": 10.07,
+        "type": "finalize incremental marking via task",
+        "usedHeapSizeAfter": 4135300,
+        "usedHeapSizeBefore": 5815964
+      },
+      {
+        "ms": 9.61,
+        "type": "finalize incremental marking via task",
+        "usedHeapSizeAfter": 4137164,
+        "usedHeapSizeBefore": 5681000
+      },
+      {
+        "ms": 9.45,
+        "type": "finalize incremental marking via task",
+        "usedHeapSizeAfter": 4142128,
+        "usedHeapSizeBefore": 5615092
+      },
+      {
+        "ms": 10.3,
+        "type": "finalize incremental marking via task",
+        "usedHeapSizeAfter": 4145132,
+        "usedHeapSizeBefore": 5768600
+      },
+      {
+        "ms": 10.62,
+        "type": "finalize incremental marking via task",
+        "usedHeapSizeAfter": 4166260,
+        "usedHeapSizeBefore": 5432508
+      },
+      {
+        "ms": 15.49,
+        "type": "sampling profiler",
+        "usedHeapSizeAfter": 4195304,
+        "usedHeapSizeBefore": 5811984
+      }
+    ],
+    "eventNames": {
+      "V8.GC_TIME_TO_SAFEPOINT": 32,
+      "V8.GC_HEAP_ENSURE_SWEEPING_COMPLETED": 31,
+      "V8.GC_HEAP_EXTERNAL_PROLOGUE": 21,
+      "MinorGC": 13,
+      "V8.GC_HEAP_PROLOGUE": 21,
+      "V8.GC_SCAVENGER": 13,
+      "V8.GC_HEAP_PROLOGUE_SAFEPOINT": 21,
+      "V8.GC_SCAVENGER_SCAVENGE": 13,
+      "V8.GC_SCAVENGER_SCAVENGE_WEAK_GLOBAL_HANDLES_IDENTIFY": 13,
+      "V8.GC_SCAVENGER_TRACED_HANDLES_COMPUTE_WEAKNESS_PARALLEL": 9,
+      "V8.GC_SCAVENGER_BACKGROUND_TRACED_HANDLES_COMPUTE_WEAKNESS_PARALLEL": 21,
+      "V8.GC_SCAVENGER_SCAVENGE_COLLECT_OLD_TO_NEW_PAGES": 13,
+      "V8.GC_SCAVENGER_SCAVENGE_PARALLEL_PHASE": 13,
+      "V8.GC_SCAVENGER_BACKGROUND_SCAVENGE_PARALLEL": 13,
+      "V8.GC_SCAVENGER_SCAVENGE_ROOTS": 13,
+      "V8.GC_SCAVENGER_SCAVENGE_PARALLEL": 13,
+      "V8.GC_SCAVENGER_SCAVENGE_WEAK_GLOBAL_HANDLES_PROCESS": 13,
+      "V8.GC_SCAVENGER_TRACED_HANDLES_RESET_PARALLEL": 12,
+      "V8.GC_SCAVENGER_BACKGROUND_TRACED_HANDLES_RESET_PARALLEL": 20,
+      "V8.GC_SCAVENGER_SCAVENGE_FINALIZE": 13,
+      "V8.GC_SCAVENGER_SCAVENGE_RESTORE_AND_QUARANTINE_PINNED": 13,
+      "V8.GC_SCAVENGER_FREE_REMEMBERED_SET": 13,
+      "V8.GC_SCAVENGER_SWEEP_ARRAY_BUFFERS": 13,
+      "V8.GC_SCAVENGER_RESIZE_NEW_SPACE": 13,
+      "V8.GC_MINOR_MS_BACKGROUND_SWEEPING": 13,
+      "V8.GC_BACKGROUND_YOUNG_ARRAY_BUFFER_SWEEP": 13,
+      "V8.GC_HEAP_EXTERNAL_WEAK_GLOBAL_HANDLES": 21,
+      "V8.GC_HEAP_EPILOGUE_SAFEPOINT": 21,
+      "V8.GC_HEAP_EPILOGUE": 21,
+      "V8.GC_HEAP_DUMP_STATISTICS": 21,
+      "V8.GC_HEAP_EXTERNAL_EPILOGUE": 21,
+      "V8.GC_MC_INCREMENTAL_START": 7,
+      "V8.GC_MC_INCREMENTAL_EXTERNAL_PROLOGUE": 7,
+      "V8.GC_MC_MARK_EMBEDDER_PROLOGUE": 16,
+      "V8.GC_MC_MARK_ROOTS": 23,
+      "V8.GC_MC_BACKGROUND_MARKING": 16,
+      "V8.GC_MC_INCREMENTAL_EXTERNAL_EPILOGUE": 7,
+      "V8.GC_MC_INCREMENTAL": 118,
+      "V8.GC_MC_INCREMENTAL_EMBEDDER_TRACING": 118,
+      "MajorGC": 8,
+      "V8.GC_MARK_COMPACTOR": 8,
+      "V8.GC_MC_PROLOGUE": 8,
+      "V8.GC_MC_MARK": 8,
+      "V8.GC_MC_MARK_FINISH_INCREMENTAL": 7,
+      "V8.GC_MC_MARK_CLIENT_HEAPS": 8,
+      "V8.GC_MC_MARK_RETAIN_MAPS": 8,
+      "V8.GC_MC_MARK_FULL_CLOSURE_PARALLEL": 8,
+      "V8.GCMarkTransitiveClosureFixpoint": 23,
+      "V8.GC_MC_MARK_WEAK_CLOSURE_EPHEMERON_MARKING": 23,
+      "V8.GCReachTransitiveClosureWithEmbedder": 23,
+      "V8.GC_MC_MARK_EMBEDDER_TRACING": 24,
+      "V8.GC_CONSERVATIVE_STACK_SCANNING": 8,
+      "V8.GC_MC_MARK_FULL_CLOSURE_SERIAL": 8,
+      "V8.GC_MC_CLEAR": 8,
+      "V8.GC_MC_CLEAR_JOIN_JOB": 8,
+      "V8.GC_MC_CLEAR_WEAK_COLLECTIONS": 8,
+      "V8.GC_MC_CLEAR_SWEEP_WASM_CODE_POINTER_TABLE": 8,
+      "V8.GC_MC_CLEAR_MAPS": 8,
+      "V8.GC_MC_CLEAR_WEAK_LISTS": 8,
+      "V8.GC_MC_CLEAR_FLUSHED_JS_FUNCTIONS": 8,
+      "V8.GC_MC_CLEAR_JS_WEAK_REFERENCES": 8,
+      "V8.GC_MC_CLEAR_WEAK_GLOBAL_HANDLES": 8,
+      "V8.GC_MC_CLEAR_SWEEP_JS_DISPATCH_TABLE": 8,
+      "V8.GC_MC_CLEAR_EXTERNAL_STRING_TABLE": 8,
+      "V8.GC_MC_CLEAR_STRING_TABLE": 64,
+      "V8.GC_MC_CLEAR_SWEEP_EXTERNAL_POINTER_TABLE": 8,
+      "V8.GC_MC_CLEAR_FLUSHABLE_BYTECODE": 8,
+      "V8.GC_MC_CLEAR_SWEEP_TRUSTED_POINTER_TABLE": 8,
+      "V8.GC_MC_CLEAR_WEAK_REFERENCES_NON_TRIVIAL": 8,
+      "V8.GC_MC_CLEAR_WEAK_REFERENCES_TRUSTED": 8,
+      "V8.GC_MC_CLEAR_WEAK_REFERENCES_TRIVIAL": 8,
+      "V8.GC_MC_SWEEP": 29,
+      "V8.GC_MC_EVACUATE": 16,
+      "V8.GC_MC_EVACUATE_PROLOGUE": 8,
+      "V8.GC_MC_EVACUATE_COPY": 8,
+      "V8.GC_MC_EVACUATE_COPY_PARALLEL": 6,
+      "V8.GC_MC_BACKGROUND_EVACUATE_COPY": 10,
+      "V8.GC_MC_BACKGROUND_SWEEPING": 49,
+      "V8.GC_MC_EVACUATE_UPDATE_POINTERS": 8,
+      "V8.GC_MC_EVACUATE_UPDATE_POINTERS_TO_NEW_ROOTS": 8,
+      "V8.GC_MC_EVACUATE_UPDATE_POINTERS_CLIENT_HEAPS": 8,
+      "V8.GC_MC_EVACUATE_UPDATE_POINTERS_SLOTS_MAIN": 8,
+      "V8.GC_MC_EVACUATE_UPDATE_POINTERS_PARALLEL": 8,
+      "V8.GC_MC_BACKGROUND_EVACUATE_UPDATE_POINTERS": 31,
+      "V8.GC_MC_EVACUATE_UPDATE_POINTERS_WEAK": 8,
+      "V8.GC_MC_EVACUATE_UPDATE_POINTERS_POINTER_TABLES": 8,
+      "V8.GC_MC_EVACUATE_CLEAN_UP": 8,
+      "V8.GC_MC_EVACUATE_EPILOGUE": 8,
+      "V8.GC_MC_SWEEP_NEW_LO": 8,
+      "V8.GC_MC_EVACUATE_REBALANCE": 8,
+      "V8.GC_MC_FINISH": 8,
+      "V8.GC_MC_FINISH_SWEEP_ARRAY_BUFFERS": 8,
+      "V8.GC_MC_SWEEP_START_JOBS": 8,
+      "V8.GC_BACKGROUND_FULL_ARRAY_BUFFER_SWEEP": 8,
+      "V8.GC_MC_EPILOGUE": 8,
+      "V8.GC_HEAP_EMBEDDER_TRACING_EPILOGUE": 8,
+      "V8.GC_HEAP_EXTERNAL_SECOND_PASS_CALLBACKS": 8,
+      "V8.GC_MC_COMPLETE_SWEEPING": 7
+    },
+    "traceEvents": 32098
+  },
+  "topSelf": [
+    {
+      "fn": "drawImage",
+      "selfMs": 1198.5336352994489,
+      "pct": 3.9498527301563326
+    },
+    {
+      "fn": "fillText",
+      "selfMs": 611.2979870289254,
+      "pct": 2.0145759383732345
+    },
+    {
+      "fn": "mark",
+      "selfMs": 532.2360168227476,
+      "pct": 1.7540215995770712
+    },
+    {
+      "fn": "save",
+      "selfMs": 382.13285599652596,
+      "pct": 1.2593459708481232
+    },
+    {
+      "fn": "draw (index-C2oTUvtH.js:8293)",
+      "selfMs": 351.1955633071521,
+      "pct": 1.1573899252322333
+    },
+    {
+      "fn": "send",
+      "selfMs": 313.9562295143872,
+      "pct": 1.0346650555094026
+    },
+    {
+      "fn": "fillRect",
+      "selfMs": 276.7168957216223,
+      "pct": 0.911940185786572
+    },
+    {
+      "fn": "render (index-C2oTUvtH.js:11379)",
+      "selfMs": 229.7380438599804,
+      "pct": 0.7571180424439242
+    }
+  ],
+  "topAllocators": [
+    {
+      "fn": "update (index-C2oTUvtH.js:9976)",
+      "bytes": 6211812
+    },
+    {
+      "fn": "renderPos (index-C2oTUvtH.js:7245)",
+      "bytes": 2966592
+    },
+    {
+      "fn": "update (index-C2oTUvtH.js:6729)",
+      "bytes": 2606636
+    },
+    {
+      "fn": "drawWorld (index-C2oTUvtH.js:7266)",
+      "bytes": 2032356
+    },
+    {
+      "fn": "draw (index-C2oTUvtH.js:7945)",
+      "bytes": 1737388
+    },
+    {
+      "fn": "update (index-C2oTUvtH.js:10086)",
+      "bytes": 1722680
+    },
+    {
+      "fn": "spriteAsteroid (index-C2oTUvtH.js:7485)",
+      "bytes": 1033032
+    },
+    {
+      "fn": "simulate (index-C2oTUvtH.js:11354)",
+      "bytes": 1000820
+    }
+  ]
+}

@@ -91,8 +91,9 @@ export class World {
     return this.#entities.size;
   }
 
-  *[Symbol.iterator](): IterableIterator<AnyEntity> {
-    yield* this.#entities.values();
+  /** The Map's own iterator (Lab 7: a generator here allocated a result object per entity per loop). */
+  [Symbol.iterator](): IterableIterator<AnyEntity> {
+    return this.#entities.values();
   }
 
   /** `for (const s of world.ofKind('ship'))` — s is typed as Ship, no cast. */

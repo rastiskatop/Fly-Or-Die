@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import * as binary from '../src/net/codec-binary.ts';
 import * as json from '../src/net/codec-json.ts';
@@ -33,11 +33,13 @@ test('determinism: same inputs → same hash, every run', () => {
   console.log('    simulation hash after 600 steps:', a);
 });
 
-test('determinism across engines + the TypeScript migration: hash unchanged since Lab 5', () => {
+test('determinism across engines: the golden hash (browser and Node must print the same)', () => {
   // Before dmath.ts (Math.sin/cos/atan2 in the sim) Node gave 99fcd6d2 and Chrome 2fc52ad4.
-  // With bit-exact trigonometry both give b736f092 — and the Lab 6 rewrite (immutable Vector2,
-  // typed entities) must not change a single bit of the simulation.
-  assert.equal(simulationHash(600).hash, 'b736f092');
+  // With bit-exact trigonometry both gave b736f092, unchanged by the Lab 6 TypeScript rewrite.
+  // Lab 7 changed it ON PURPOSE, once: swept bullet collisions — in this 600-step run some
+  // bullets used to tunnel through rocks and now hit them. The spatial hash and the object
+  // pools that came after must NOT change it again.
+  assert.equal(simulationHash(600).hash, '46a323ea');
 });
 
 test('dmath: within 1 ulp-ish of Math, bit-identical everywhere', () => {

@@ -9,6 +9,7 @@ export function demonstrateThisBug(ship: Ship, world: World): void {
   // BUG: we pass the function, not the call. The timer later calls it as a bare
   // function: fire() — default binding, `this` is undefined (modules are strict).
   setTimeout(function naive() {
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- this IS the bug being demonstrated
     const fire = ship.fire; // what setTimeout(ship.fire, 0) effectively does
     try {
       fire(world);

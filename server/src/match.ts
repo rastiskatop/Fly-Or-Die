@@ -7,6 +7,7 @@ import { asSeq, asTick, type EntityId, type Seq, type Tick } from '@flyordie/sha
 import { createMatchWorld, spawnPlayerShip } from '@flyordie/shared/sim/game.ts';
 import { bounds } from '@flyordie/shared/sim/arena.ts';
 import { NO_CONTROLS } from '@flyordie/shared/sim/ship.ts';
+import { SampleRing, summarize } from '@flyordie/shared/stats.ts';
 import {
   TICK_RATE,
   DT,
@@ -37,7 +38,9 @@ interface MatchEvents {
   snapshot: [snapshot: TickSnapshot];
 }
 
-interface MatchStats {
+// A type alias, not an interface: aliases get an implicit index signature, so
+// Object.entries(stats) is [string, number][] instead of [string, any][].
+type MatchStats = {
   ticks: number;
   durationAvgMs: number;
   durationMaxMs: number;
@@ -46,7 +49,7 @@ interface MatchStats {
   overruns: number;
   starved: number;
   droppedInputs: number;
-}
+};
 
 const INTERVAL_MS = 1000 / TICK_RATE;
 
@@ -69,6 +72,8 @@ export class Match extends EventEmitter<MatchEvents> {
   readonly world: World;
   readonly players = new Map<string, PlayerSlot>();
   readonly stats: MatchStats;
+  /** The last ~60 s of tick durations (ms), for p50/p95/p99 (Lab 7). */
+  readonly tickTimes = new SampleRing(TICK_RATE * 60);
 
   constructor({ roomId, arena }: { roomId: string; arena: Partial<ArenaRules> }) {
     super();
@@ -173,6 +178,7 @@ export class Match extends EventEmitter<MatchEvents> {
     const late = start - this.#nextAt;
     this.step();
     const duration = performance.now() - start;
+    this.tickTimes.push(duration);
 
     const s = this.stats;
     s.ticks++;
@@ -193,6 +199,7 @@ export class Match extends EventEmitter<MatchEvents> {
 
   statsJSON(): Record<string, number | string> {
     const round = (n: number) => Math.round(n * 100) / 100;
+    const t = summarize(this.tickTimes.values());
     return {
       room: this.roomId,
       tick: this.world.tick,
@@ -200,6 +207,9 @@ export class Match extends EventEmitter<MatchEvents> {
       players: this.players.size,
       entities: this.world.size,
       ...Object.fromEntries(Object.entries(this.stats).map(([k, v]) => [k, round(v)])),
+      tickP50Ms: round(t.p50),
+      tickP95Ms: round(t.p95),
+      tickP99Ms: round(t.p99),
     };
   }
 }

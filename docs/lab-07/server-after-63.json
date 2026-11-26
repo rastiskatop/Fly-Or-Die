@@ -1,0 +1,82 @@
+{
+  "label": "after-63",
+  "seconds": 60,
+  "bots": 63,
+  "room": "eu-2",
+  "meanEntities": 97,
+  "match": {
+    "room": "eu-2",
+    "entities": 91,
+    "tickP50Ms": 0.55,
+    "tickP95Ms": 1.23,
+    "tickP99Ms": 1.93,
+    "durationMaxMs": 7.09,
+    "overruns": 0,
+    "tick": 1801,
+    "tickRate": 30,
+    "players": 63,
+    "ticks": 1801,
+    "durationAvgMs": 0.5,
+    "jitterAvgMs": 0.57,
+    "jitterMaxMs": 9.87,
+    "starved": 63,
+    "droppedInputs": 0
+  },
+  "process": {
+    "eventLoopUtilization": 0.017,
+    "rssMB": 106.875,
+    "heapUsedMB": 27.125
+  },
+  "topSelf": [
+    {
+      "fn": "botDecide (bots.ts:56)",
+      "selfMs": 67.09276562388656,
+      "pct": 0.11045393002209078
+    },
+    {
+      "fn": "internalModuleStat",
+      "selfMs": 66.01062424285612,
+      "pct": 0.10867241502173448
+    },
+    {
+      "fn": "step (match.ts:139)",
+      "selfMs": 56.27135181358227,
+      "pct": 0.09263878001852775
+    },
+    {
+      "fn": "snapshotEntities (protocol.ts:143)",
+      "selfMs": 50.86064490843013,
+      "pct": 0.08373120501674625
+    },
+    {
+      "fn": "compileSourceTextModule (utils:316)",
+      "selfMs": 47.61422076533885,
+      "pct": 0.07838666001567733
+    },
+    {
+      "fn": "lstat",
+      "selfMs": 45.44993800327799,
+      "pct": 0.07482363001496473
+    },
+    {
+      "fn": "(garbage collector)",
+      "selfMs": 36.792806955034564,
+      "pct": 0.060571510012114305
+    },
+    {
+      "fn": "compileForInternalLoader (realm:383)",
+      "selfMs": 29.217817287821564,
+      "pct": 0.04810090500962018
+    },
+    {
+      "fn": "open",
+      "selfMs": 23.807110382669425,
+      "pct": 0.039193330007838666
+    },
+    {
+      "fn": "__require (index:8)",
+      "selfMs": 17.314262096486853,
+      "pct": 0.02850424000570085
+    }
+  ]
+}

@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { z } from 'zod';
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
@@ -11,9 +12,14 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { ServerConfig } from '../config.ts';
 import type { RoomManager } from '../rooms.ts';
 
+/** POST /api/rooms/:id/bots body: how many bots the room should have (0 removes them). */
+const BotsBodySchema = z.object({ count: z.number().int().min(0).max(64) });
+
 export interface ApiContext {
   readonly config: ServerConfig;
   readonly rooms: RoomManager;
+  /** Sets a room's bot count; returns the count actually reached (free slots), null = no such room. */
+  readonly setBots: (roomId: string, count: number) => number | null;
   readonly stats: { connections: number; dropped: number; bytesIn: number; bytesOut: number };
   readonly netStats: () => Readonly<Record<string, unknown>>;
 }
@@ -39,6 +45,7 @@ export function createApiHandler(ctx: ApiContext): ApiHandler {
     ['GET', /^\/health$/, health],
     ['GET', /^\/api\/rooms$/, listRooms],
     ['POST', /^\/api\/rooms$/, createRoom],
+    ['POST', /^\/api\/rooms\/([a-z0-9-]{1,32})\/bots$/, setBots],
     ['GET', /^\/api\/stats$/, netStats],
     ['GET', /^\/api\/replays$/, replays],
     ['GET', /^\/api\/replays\/([^/]+)$/, streamReplay],
@@ -118,6 +125,22 @@ export function createApiHandler(ctx: ApiContext): ApiHandler {
       if (err instanceof RoomLimitError) throw new HttpError(503, err.message);
       throw err;
     }
+  }
+
+  /** Lab 7: server-side AI pilots. They take room slots like players do. */
+  async function setBots(
+    req: IncomingMessage,
+    res: ServerResponse,
+    _url: URL,
+    roomId = '',
+  ): Promise<void> {
+    const parsed = BotsBodySchema.safeParse(await readJsonBody(req, config.maxBodyBytes));
+    if (!parsed.success)
+      throw new HttpError(400, `bad body: ${parsed.error.issues[0]?.message ?? '?'}`);
+    const bots = ctx.setBots(roomId, parsed.data.count);
+    if (bots === null) throw new HttpError(404, `room ${roomId} not found`);
+    log.info('bots set', { room: roomId, wanted: parsed.data.count, bots });
+    sendJson(res, 200, { room: roomId, bots });
   }
 
   async function replays(_req: IncomingMessage, res: ServerResponse): Promise<void> {

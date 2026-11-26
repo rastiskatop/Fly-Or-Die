@@ -23,8 +23,9 @@ export interface Audio {
 // Owns the AudioContext. Plays decoded AudioBuffers with zero latency and unlimited overlap.
 // Rule of the platform: a context created before a user gesture starts "suspended";
 // it can only be resumed from inside a click/keydown handler — see unlock().
-export function createAudio(): Audio {
-  const ctx = 'AudioContext' in window ? new AudioContext() : null;
+/** @param enabled false (?sound=0) = no AudioContext at all: silence, for profiling experiments. */
+export function createAudio({ enabled = true }: { enabled?: boolean } = {}): Audio {
+  const ctx = enabled && 'AudioContext' in window ? new AudioContext() : null;
   const buffers = new Map<string, AudioBuffer>();
   let master: GainNode | null = null;
   let muted = false;

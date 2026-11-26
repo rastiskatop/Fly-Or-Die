@@ -308,13 +308,21 @@ export function createBattlefield(
   g.fillRect(0, 0, width, height);
 
   // ---------- animated overlay ----------
-  const clouds = Array.from({ length: 6 }, () => ({
-    x: rnd(0, width),
-    y: rnd(0, height),
-    rx: rnd(90, 200),
-    ry: rnd(50, 110),
-    speed: rnd(8, 18),
-  }));
+  // Lab 7: each cloud's gradient is built ONCE, centred on (0, 0), and positioned with translate().
+  // It used to be createRadialGradient() per cloud per frame — 6 new CanvasGradient objects every
+  // frame (Blink objects with JS wrappers), measured as a top allocator.
+  const clouds = Array.from({ length: 6 }, () => {
+    // same rnd() order as before (x, y, rx, ry, speed): the map looks exactly as it did
+    const x = rnd(0, width);
+    const y = rnd(0, height);
+    const rx = rnd(90, 200);
+    const ry = rnd(50, 110);
+    const speed = rnd(8, 18);
+    const grad = g.createRadialGradient(0, 0, 0, 0, 0, rx);
+    grad.addColorStop(0, 'rgba(0, 0, 0, 0.14)');
+    grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+    return { x, y, rx, ry, speed, grad };
+  });
   let flight: { x: number; y: number; vx: number; vy: number; n: number; scale: number } | null =
     null; // plane shadows crossing the map
   let nextFlight = 2;
@@ -326,16 +334,12 @@ export function createBattlefield(
       for (const c of clouds) {
         c.x += c.speed * dt;
         if (c.x - c.rx > width) c.x = -c.rx;
-        const grad = ctx.createRadialGradient(c.x, c.y, 0, c.x, c.y, c.rx);
-        grad.addColorStop(0, 'rgba(0, 0, 0, 0.14)');
-        grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
         ctx.save();
         ctx.translate(c.x, c.y);
         ctx.scale(1, c.ry / c.rx);
-        ctx.translate(-c.x, -c.y);
-        ctx.fillStyle = grad;
+        ctx.fillStyle = c.grad;
         ctx.beginPath();
-        ctx.arc(c.x, c.y, c.rx, 0, Math.PI * 2);
+        ctx.arc(0, 0, c.rx, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
       }

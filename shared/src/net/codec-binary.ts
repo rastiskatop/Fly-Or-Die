@@ -44,8 +44,16 @@ import { asEntityId, asSeq, asTick } from '../ids.ts';
 import { isAsteroidSize } from '../sim/asteroid.ts';
 import { PICKUP_EFFECTS, type PickupEffect } from '../sim/pickup.ts';
 import type { GameEvent } from '../sim/events.ts';
-import type { EntityState, EntityStateKind, Input, Snapshot } from './protocol.ts';
-import { InputSchema } from './protocol.ts';
+import type {
+  AsteroidState,
+  BulletState,
+  EntityState,
+  EntityStateKind,
+  Input,
+  PickupState,
+  ShipState,
+  Snapshot,
+} from './protocol.ts';
 
 export const MSG = Object.freeze({ INPUTS: 1, SNAPSHOT: 2 });
 export const VERSION = 1;
@@ -108,7 +116,13 @@ export function decodeInputs(data: BinaryData): Input[] {
   if (n < 1 || n > 8 || v.byteLength !== 2 + 5 * n) throw new Error('bad inputs length');
   const inputs: Input[] = [];
   for (let i = 0, o = 2; i < n; i++, o += 5) {
-    inputs.push(InputSchema.parse({ seq: v.getUint32(o, LE), buttons: v.getUint8(o + 4) }));
+    // The same rules as InputSchema (seq > 0, buttons 0..15), checked directly: this runs for every
+    // input of every client 30×/s on the server, and a zod parse allocates (Lab 7 load test).
+    const seq = asSeq(v.getUint32(o, LE));
+    const buttons = v.getUint8(o + 4);
+    if (seq === 0) throw new RangeError('input seq must be > 0');
+    if (buttons > 15) throw new RangeError(`bad buttons ${buttons}`);
+    inputs.push({ seq, buttons });
   }
   return inputs;
 }
@@ -259,7 +273,123 @@ export function encodeSnapshot(snap: Snapshot): Uint8Array<ArrayBuffer> {
 }
 
 /** Validating decoder: version guard, bounds checks before every read, ranges via branded ids. */
-export function decodeSnapshot(data: BinaryData): Snapshot {
+// ---------- decoding into recycled objects (Lab 7) ----------
+// The client keeps ~9 decoded snapshots for interpolation. With V8's minor mark-sweep, whatever is
+// alive when a minor GC runs is promoted to the old generation — so freshly decoded entity objects
+// were the main source of old-generation garbage (major GCs). With a pool, the entity objects of a
+// snapshot that left the history are refilled by the next decode instead of being garbage.
+type Mutable<T> = { -readonly [K in keyof T]: T[K] };
+type MShip = Mutable<ShipState>;
+type MBullet = Mutable<BulletState>;
+type MAsteroid = Mutable<AsteroidState>;
+type MPickup = Mutable<PickupState>;
+
+/** Free lists per kind. One factory per kind (fixed field order) → one hidden class per kind. */
+export class SnapshotPool {
+  readonly #ships: MShip[] = [];
+  readonly #bullets: MBullet[] = [];
+  readonly #asteroids: MAsteroid[] = [];
+  readonly #pickups: MPickup[] = [];
+  created = 0;
+  reused = 0;
+
+  /** Give back the entities of a snapshot nobody reads any more. Only binary-decoded ones. */
+  release(entities: readonly EntityState[]): void {
+    for (const e of entities) {
+      if (e.kind === 'ship') this.#ships.push(e);
+      else if (e.kind === 'bullet') this.#bullets.push(e);
+      else if (e.kind === 'asteroid') this.#asteroids.push(e);
+      else this.#pickups.push(e);
+    }
+  }
+  ship(): MShip {
+    const s = this.#ships.pop();
+    if (s) this.reused++;
+    else this.created++;
+    return s ?? newShip();
+  }
+  bullet(): MBullet {
+    const b = this.#bullets.pop();
+    if (b) this.reused++;
+    else this.created++;
+    return b ?? newBullet();
+  }
+  asteroid(): MAsteroid {
+    const a = this.#asteroids.pop();
+    if (a) this.reused++;
+    else this.created++;
+    return a ?? newAsteroid();
+  }
+  pickup(): MPickup {
+    const p = this.#pickups.pop();
+    if (p) this.reused++;
+    else this.created++;
+    return p ?? newPickup();
+  }
+}
+
+const NO_ID = asEntityId(1);
+const newShip = (): MShip => ({
+  kind: 'ship',
+  id: NO_ID,
+  x: 0,
+  y: 0,
+  angle: 0,
+  vx: 0,
+  vy: 0,
+  hp: 0,
+  destroyed: false,
+  thrusting: false,
+  hitFlash: false,
+  score: 0,
+  deaths: 0,
+  speed: 0,
+  bullets: 0,
+  invulnerable: 0,
+  respawnIn: 0,
+  fireCooldown: 0,
+});
+const newBullet = (): MBullet => ({
+  kind: 'bullet',
+  id: NO_ID,
+  x: 0,
+  y: 0,
+  angle: 0,
+  vx: 0,
+  vy: 0,
+  owner: NO_ID,
+  spawnSeq: asSeq(0),
+  fast: false,
+});
+const newAsteroid = (): MAsteroid => ({
+  kind: 'asteroid',
+  id: NO_ID,
+  x: 0,
+  y: 0,
+  angle: 0,
+  size: 1,
+  seeker: false,
+  hitFlash: false,
+});
+const newPickup = (): MPickup => ({
+  kind: 'pickup',
+  id: NO_ID,
+  x: 0,
+  y: 0,
+  angle: 0,
+  effect: 'repair',
+  lifeLeft: 0,
+});
+
+/** Without a pool every entity is a new object (server tests, tools); with one, recycled. */
+const FRESH = {
+  ship: newShip,
+  bullet: newBullet,
+  asteroid: newAsteroid,
+  pickup: newPickup,
+};
+
+export function decodeSnapshot(data: BinaryData, pool?: SnapshotPool): Snapshot {
   const v = view(data);
   need(v, HEADER, 'snapshot header');
   if (v.getUint8(0) !== MSG.SNAPSHOT) throw new Error('not a snapshot');
@@ -270,72 +400,80 @@ export function decodeSnapshot(data: BinaryData): Snapshot {
   const eventCount = v.getUint8(12);
   const entities: EntityState[] = [];
   const events: GameEvent[] = [];
+  const make = pool ?? FRESH;
   let o = HEADER;
 
   for (let i = 0; i < count; i++) {
     need(v, o + COMMON, 'entity header');
     const code = v.getUint8(o + 2);
-    const common = {
-      id: asEntityId(v.getUint16(o, LE)),
-      x: v.getFloat32(o + 3, LE),
-      y: v.getFloat32(o + 7, LE),
-      angle: v.getInt16(o + 11, LE) / ANGLE_SCALE,
-    };
+    const id = asEntityId(v.getUint16(o, LE));
+    const x = v.getFloat32(o + 3, LE);
+    const y = v.getFloat32(o + 7, LE);
+    const angle = v.getInt16(o + 11, LE) / ANGLE_SCALE;
     o += COMMON;
     if (code === KIND_CODE.ship) {
       need(v, o + 23, 'ship');
       const flags = v.getUint8(o + 9);
-      entities.push({
-        kind: 'ship',
-        ...common,
-        vx: v.getFloat32(o, LE),
-        vy: v.getFloat32(o + 4, LE),
-        hp: v.getUint8(o + 8),
-        destroyed: (flags & 1) !== 0,
-        thrusting: (flags & 2) !== 0,
-        hitFlash: (flags & 4) !== 0,
-        score: v.getUint16(o + 10, LE),
-        deaths: v.getUint16(o + 12, LE),
-        speed: v.getUint16(o + 14, LE) / 1000,
-        bullets: v.getUint16(o + 16, LE) / 1000,
-        invulnerable: v.getUint16(o + 18, LE) / 1000,
-        respawnIn: v.getUint16(o + 20, LE) / 1000,
-        fireCooldown: v.getUint8(o + 22) / 1000,
-      });
+      const e = make.ship();
+      e.id = id;
+      e.x = x;
+      e.y = y;
+      e.angle = angle;
+      e.vx = v.getFloat32(o, LE);
+      e.vy = v.getFloat32(o + 4, LE);
+      e.hp = v.getUint8(o + 8);
+      e.destroyed = (flags & 1) !== 0;
+      e.thrusting = (flags & 2) !== 0;
+      e.hitFlash = (flags & 4) !== 0;
+      e.score = v.getUint16(o + 10, LE);
+      e.deaths = v.getUint16(o + 12, LE);
+      e.speed = v.getUint16(o + 14, LE) / 1000;
+      e.bullets = v.getUint16(o + 16, LE) / 1000;
+      e.invulnerable = v.getUint16(o + 18, LE) / 1000;
+      e.respawnIn = v.getUint16(o + 20, LE) / 1000;
+      e.fireCooldown = v.getUint8(o + 22) / 1000;
+      entities.push(e);
       o += 23;
     } else if (code === KIND_CODE.bullet) {
       need(v, o + 11, 'bullet');
-      entities.push({
-        kind: 'bullet',
-        ...common,
-        vx: v.getInt16(o, LE),
-        vy: v.getInt16(o + 2, LE),
-        owner: asEntityId(v.getUint16(o + 4, LE)),
-        spawnSeq: asSeq(v.getUint32(o + 6, LE)),
-        fast: (v.getUint8(o + 10) & 1) !== 0,
-      });
+      const e = make.bullet();
+      e.id = id;
+      e.x = x;
+      e.y = y;
+      e.angle = angle;
+      e.vx = v.getInt16(o, LE);
+      e.vy = v.getInt16(o + 2, LE);
+      e.owner = asEntityId(v.getUint16(o + 4, LE));
+      e.spawnSeq = asSeq(v.getUint32(o + 6, LE));
+      e.fast = (v.getUint8(o + 10) & 1) !== 0;
+      entities.push(e);
       o += 11;
     } else if (code === KIND_CODE.asteroid) {
       need(v, o + 2, 'asteroid');
       const size = v.getUint8(o);
       if (!isAsteroidSize(size)) throw new RangeError(`bad asteroid size ${size}`);
       const flags = v.getUint8(o + 1);
-      entities.push({
-        kind: 'asteroid',
-        ...common,
-        size,
-        seeker: (flags & 1) !== 0,
-        hitFlash: (flags & 2) !== 0,
-      });
+      const e = make.asteroid();
+      e.id = id;
+      e.x = x;
+      e.y = y;
+      e.angle = angle;
+      e.size = size;
+      e.seeker = (flags & 1) !== 0;
+      e.hitFlash = (flags & 2) !== 0;
+      entities.push(e);
       o += 2;
     } else if (code === KIND_CODE.pickup) {
       need(v, o + 2, 'pickup');
-      entities.push({
-        kind: 'pickup',
-        ...common,
-        effect: effectAt(v.getUint8(o)),
-        lifeLeft: v.getUint8(o + 1) / 10,
-      });
+      const effect = effectAt(v.getUint8(o));
+      const e = make.pickup();
+      e.id = id;
+      e.x = x;
+      e.y = y;
+      e.angle = angle;
+      e.effect = effect;
+      e.lifeLeft = v.getUint8(o + 1) / 10;
+      entities.push(e);
       o += 2;
     } else {
       throw new RangeError(`unknown entity kind ${code} at byte ${o - COMMON}`);
